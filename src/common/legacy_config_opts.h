@@ -24,6 +24,7 @@ OPTION(lockdep_force_backtrace, OPT_BOOL) // always gather current backtrace at 
 OPTION(run_dir, OPT_STR)       // the "/var/run/ceph" dir, created on daemon startup
 OPTION(admin_socket, OPT_STR) // default changed by common_preinit()
 OPTION(admin_socket_mode, OPT_STR) // permission bits to set for admin socket file, e.g., "0775", "0755"
+OPTION(data_inline_limit_bytes, OPT_U64)
 
 OPTION(daemonize, OPT_BOOL) // default changed by common_preinit()
 OPTION(setuser, OPT_STR)        // uid or user name

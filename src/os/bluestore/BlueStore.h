@@ -50,6 +50,8 @@ class BlueFS;
 //#define DEBUG_DEFERRED
 
 
+// inlined data's key
+#define INLINE_DATA_ATTR "idt"
 
 // constants for Buffer::optimize()
 #define MAX_BUFFER_SLOP_RATIO_DEN  8  // so actually 1/N
@@ -2574,7 +2576,8 @@ private:
 	     OnodeRef& o,
 	     uint64_t offset, size_t len,
 	     bufferlist& bl,
-	     uint32_t fadvise_flags);
+	     uint32_t fadvise_flags,
+       bool inlined=false);
   void _pad_zeros(bufferlist *bl, uint64_t *offset,
 		  uint64_t chunk_size);
 
@@ -2616,7 +2619,7 @@ private:
 	    CollectionRef& c,
 	    OnodeRef& o,
 	    uint64_t offset, size_t len);
-  void _do_truncate(TransContext *txc,
+  int _do_truncate(TransContext *txc,
 		   CollectionRef& c,
 		   OnodeRef o,
 		   uint64_t offset,

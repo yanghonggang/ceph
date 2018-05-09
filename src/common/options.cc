@@ -200,6 +200,10 @@ std::vector<Option> get_global_options() {
     .set_description("Interface name(s) from which to choose an address from a cluster_network to bind to; cluster_network must also be specified.")
     .add_see_also("cluster_network"),
 
+    Option("data_inline_limit_bytes", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
+    .set_default(4096)
+    .set_description("Object whose data is less than this will be inlined, set 0 to disable this"),
+
     Option("monmap", Option::TYPE_STR, Option::LEVEL_ADVANCED)
     .set_description("path to MonMap file")
     .set_long_description("This option is normally used during mkfs, but can also "

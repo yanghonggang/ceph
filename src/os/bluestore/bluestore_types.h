@@ -954,6 +954,7 @@ struct bluestore_onode_t {
   uint32_t alloc_hint_flags = 0;
 
   uint8_t flags = 0;
+  bool inline_valid = false; // in memory member
 
   enum {
     FLAG_OMAP = 1,
@@ -977,6 +978,10 @@ struct bluestore_onode_t {
 
   void clear_flag(unsigned f) {
     flags &= ~f;
+  }
+
+  bool has_hint_flag_inlined() const {
+    return alloc_hint_flags & CEPH_OSD_ALLOC_HINT_FLAG_INLINE;
   }
 
   bool has_omap() const {
