@@ -101,6 +101,7 @@ void usage(ostream& out)
 "\n"
 "   listsnaps <obj-name>             list the snapshots of this object\n"
 "   bench <seconds> write|seq|rand [-t concurrent_operations] [--no-cleanup] [--run-name run_name] [--no-hints]\n"
+"                                    [--inline]\n"
 "                                    default is 16 concurrent IOs and 4 MB ops\n"
 "                                    default is to clean up after write benchmark\n"
 "                                    default run-name is 'benchmark_last_metadata'\n"
@@ -376,7 +377,7 @@ static int do_copy_pool(Rados& rados, const char *src_pool, const char *target_p
 
 static int do_put(IoCtx& io_ctx, RadosStriper& striper,
 		  const char *objname, const char *infile, int op_size,
-		  uint64_t obj_offset, bool use_striper)
+		  uint64_t obj_offset, bool use_striper, bool inline_small)
 {
   string oid(objname);
   bool stdio = (strcmp(infile, "-") == 0);
@@ -429,10 +430,19 @@ static int do_put(IoCtx& io_ctx, RadosStriper& striper,
       else
 	ret = striper.write(oid, indata, count, offset);
     } else {
-      if (offset == 0)
-	ret = io_ctx.write_full(oid, indata);
-      else
-	ret = io_ctx.write(oid, indata, count, offset);
+      if (inline_small) {
+        assert(offset == 0); // inline object only support write_full op
+        ret = io_ctx.set_alloc_hint2(oid, indata.length(), indata.length(),
+                                     ALLOC_HINT_FLAG_INLINE);
+        if (ret < 0)
+          goto out;
+        ret = io_ctx.write_full(oid, indata);
+      } else {
+        if (offset == 0)
+          ret = io_ctx.write_full(oid, indata);
+        else
+          ret = io_ctx.write(oid, indata, count, offset);
+      }
     }
 
     if (ret < 0) {
@@ -916,12 +926,15 @@ protected:
     librados::ObjectWriteOperation op;
 
     if (write_destination & OP_WRITE_DEST_OBJ) {
-      if (data.hints)
-	op.set_alloc_hint2(data.object_size, data.op_size,
-			   ALLOC_HINT_FLAG_SEQUENTIAL_WRITE |
-			   ALLOC_HINT_FLAG_SEQUENTIAL_READ |
-			   ALLOC_HINT_FLAG_APPEND_ONLY |
-			   ALLOC_HINT_FLAG_IMMUTABLE);
+      if (data.hints) {
+        uint32_t flags = ALLOC_HINT_FLAG_SEQUENTIAL_WRITE |
+                         ALLOC_HINT_FLAG_SEQUENTIAL_READ |
+                         ALLOC_HINT_FLAG_APPEND_ONLY |
+                         ALLOC_HINT_FLAG_IMMUTABLE;
+        if (data.inline_small)
+          flags |= ALLOC_HINT_FLAG_INLINE;
+	op.set_alloc_hint2(data.object_size, data.op_size, flags);
+      }
       op.write(offset, bl);
     }
 
@@ -1693,6 +1706,7 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
   int bench_write_dest = 0;
   bool cleanup = true;
   bool hints = true; // for rados bench
+  bool inline_small = false; // for rados bench, inline small write
   bool no_verify = false;
   bool use_striper = false;
   bool with_clones = false;
@@ -1878,6 +1892,10 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
   i = opts.find("no-hints");
   if (i != opts.end()) {
     hints = false;
+  }
+  i = opts.find("inline");
+  if (i != opts.end()) {
+    inline_small = true;
   }
   i = opts.find("pretty-format");
   if (i != opts.end()) {
@@ -2334,7 +2352,8 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
   else if (strcmp(nargs[0], "put") == 0) {
     if (!pool_name || nargs.size() < 3)
       usage_exit();
-    ret = do_put(io_ctx, striper, nargs[1], nargs[2], op_size, obj_offset, use_striper);
+    ret = do_put(io_ctx, striper, nargs[1], nargs[2], op_size, obj_offset,
+                 use_striper, inline_small);
     if (ret < 0) {
       cerr << "error putting " << pool_name << "/" << nargs[1] << ": " << cpp_strerror(ret) << std::endl;
       goto out;
@@ -3081,9 +3100,11 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
     else if (object_size < op_size)
       op_size = object_size;
     cout << "hints = " << (int)hints << std::endl;
+    cout << "inline = " << (int)inline_small << std::endl;
     ret = bencher.aio_bench(operation, seconds,
 			    concurrent_ios, op_size, object_size,
-			    max_objects, cleanup, hints, run_name, no_verify);
+			    max_objects, cleanup, hints, run_name, no_verify,
+                            inline_small);
     if (ret != 0)
       cerr << "error during benchmark: " << cpp_strerror(ret) << std::endl;
     if (formatter && output)
@@ -3692,6 +3713,8 @@ int main(int argc, const char **argv)
       opts["no-cleanup"] = "true";
     } else if (ceph_argparse_flag(args, i, "--no-hints", (char*)NULL)) {
       opts["no-hints"] = "true";
+    } else if (ceph_argparse_flag(args, i, "--inline", (char*)NULL)) {
+      opts["inline"] = "true";
     } else if (ceph_argparse_flag(args, i, "--no-verify", (char*)NULL)) {
       opts["no-verify"] = "true";
     } else if (ceph_argparse_witharg(args, i, &val, "--run-name", (char*)NULL)) {
