@@ -2546,7 +2546,8 @@ PrimaryLogPG::cache_result_t PrimaryLogPG::maybe_handle_cache_detail(
     }
 
     if (op->may_write() || op->may_cache()) {
-      if (can_proxy_write) {
+      if (can_proxy_write && !cct->_conf->osd_tier_force_writeback) {
+        dout(20) << __func__ << " do proxy write" << dendl;
         do_proxy_write(op, missing_oid);
       } else {
 	// promote if can't proxy the write
