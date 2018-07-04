@@ -255,6 +255,8 @@ private:
   vector<Allocator*> alloc;                   ///< allocators for bdevs
   vector<interval_set<uint64_t>> pending_release; ///< extents to release
 
+  BlockDevice::aio_callback_t discard_cb[3]; //discard callbacks for each dev
+
   void _init_logger();
   void _shutdown_logger();
   void _update_logger_stats();
@@ -397,6 +399,9 @@ public:
   /// reclaim block space
   int reclaim_blocks(unsigned bdev, uint64_t want,
 		     AllocExtentVector *extents);
+
+  // handler for discard event
+  void handle_discard(unsigned dev, interval_set<uint64_t>& to_release);
 
   void flush(FileWriter *h) {
     std::lock_guard<std::mutex> l(lock);

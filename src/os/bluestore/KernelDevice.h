@@ -40,7 +40,17 @@ class KernelDevice : public BlockDevice {
   aio_queue_t aio_queue;
   aio_callback_t aio_callback;
   void *aio_callback_priv;
+  aio_callback_t discard_callback;
+  void *discard_callback_priv;
   bool aio_stop;
+  bool discard_started;
+  bool discard_stop;
+
+  std::mutex discard_lock;
+  std::condition_variable discard_cond;
+  bool discard_running = false;
+  interval_set<uint64_t> discard_queued;
+  interval_set<uint64_t> discard_finishing;
 
   struct AioCompletionThread : public Thread {
     KernelDevice *bdev;
@@ -51,11 +61,26 @@ class KernelDevice : public BlockDevice {
     }
   } aio_thread;
 
+  struct DiscardThread : public Thread {
+    KernelDevice *bdev;
+    explicit DiscardThread(KernelDevice *b) : bdev(b) {}
+    void *entry() override {
+      bdev->_discard_thread();
+      return NULL;
+    }
+  } discard_thread;
+
   std::atomic_int injecting_crash;
 
   void _aio_thread();
+  void _discard_thread();
+  int queue_discard(interval_set<uint64_t> &to_release) override;
+
   int _aio_start();
   void _aio_stop();
+
+  int _discard_start();
+  void _discard_stop();
 
   void _aio_log_start(IOContext *ioc, uint64_t offset, uint64_t length);
   void _aio_log_finish(IOContext *ioc, uint64_t offset, uint64_t length);
@@ -75,9 +100,10 @@ class KernelDevice : public BlockDevice {
   void debug_aio_unlink(aio_t& aio);
 
 public:
-  KernelDevice(CephContext* cct, aio_callback_t cb, void *cbpriv);
+  KernelDevice(CephContext* cct, aio_callback_t cb, void *cbpriv, aio_callback_t d_cb, void *d_cbpriv);
 
   void aio_submit(IOContext *ioc) override;
+  void discard_drain() override;
 
   uint64_t get_size() const override {
     return size;
@@ -100,6 +126,7 @@ public:
 		IOContext *ioc,
 		bool buffered) override;
   int flush() override;
+  int discard(uint64_t offset, uint64_t len) override;
 
   // for managing buffered readers/writers
   int invalidate_cache(uint64_t off, uint64_t len) override;
