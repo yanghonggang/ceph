@@ -201,7 +201,7 @@ std::vector<Option> get_global_options() {
     .add_see_also("cluster_network"),
 
     Option("data_inline_limit_bytes", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
-    .set_default(4096)
+    .set_default(0)
     .set_description("Object whose data is less than this will be inlined, set 0 to disable this"),
 
     Option("monmap", Option::TYPE_STR, Option::LEVEL_ADVANCED)
