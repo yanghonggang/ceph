@@ -1567,7 +1567,11 @@ public:
     bluestore_deferred_transaction_t *deferred_txn = nullptr; ///< if any
 
     interval_set<uint64_t> allocated, released;
+    interval_set<uint64_t> allocated_fast, released_fast;
     volatile_statfs statfs_delta;
+
+    uint64_t preallocated = 0;
+    int rval = 0;
 
     IOContext ioc;
     bool had_ios = false;  ///< true if we submitted IOs before our kv txn
@@ -1830,9 +1834,12 @@ private:
 
   KeyValueDB *db = nullptr;
   BlockDevice *bdev = nullptr;
+  BlockDevice *bdev_fast = nullptr;
   std::string freelist_type;
   FreelistManager *fm = nullptr;
+  FreelistManager *fm_fast = nullptr;
   Allocator *alloc = nullptr;
+  Allocator *alloc_fast = nullptr;
   uuid_d fsid;
   int path_fd = -1;  ///< open handle to $path
   int fsid_fd = -1;  ///< open handle (locked) to $path/fsid
@@ -1988,6 +1995,12 @@ private:
   void _close_fm();
   int _open_alloc();
   void _close_alloc();
+  int _open_bdev_fast(bool create);
+  void _close_bdev_fast();
+  int _open_fm_fast(bool create);
+  void _close_fm_fast();
+  int _open_alloc_fast();
+  void _close_alloc_fast();
   int _open_collections(int *errors=0);
   void _close_collections();
 
@@ -2465,6 +2478,7 @@ private:
   struct WriteContext {
     bool buffered = false;          ///< buffered write
     bool compress = false;          ///< compressed write
+    uint64_t preallocated = 0;
     uint64_t target_blob_size = 0;  ///< target (max) blob size
     unsigned csum_order = 0;        ///< target checksum chunk order
 
@@ -2707,6 +2721,11 @@ private:
 			CollectionRef& c,
 			CollectionRef& d,
 			unsigned bits, int rem);
+  int _move_data_between_tiers(
+    TransContext *txc,
+    CollectionRef& c,
+    OnodeRef& o,
+    uint32_t flags);
 };
 
 inline ostream& operator<<(ostream& out, const BlueStore::OpSequencer& s) {

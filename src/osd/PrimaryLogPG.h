@@ -544,6 +544,8 @@ public:
     ObjectContextRef clone_obc;    // if we created a clone
     ObjectContextRef snapset_obc;  // if we created/deleted a snapdir
 
+    int rval;
+
     // FIXME: we may want to kill this msgr hint off at some point!
     boost::optional<int> data_off = boost::none;
 
