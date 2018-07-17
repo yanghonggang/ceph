@@ -121,7 +121,7 @@ void usage(ostream& out)
 "   watch <obj-name>                 add watcher on this object\n"
 "   notify <obj-name> <message>      notify watcher of this object with message\n"
 "   listwatchers <obj-name>          list the watchers of this object\n"
-"   set-alloc-hint <obj-name> <expected-object-size> <expected-write-size>\n"
+"   set-alloc-hint <obj-name> <expected-object-size> <expected-write-size> [--fast]\n"
 "                                    set allocation hint for an object\n"
 "\n"
 "IMPORT AND EXPORT\n"
@@ -1707,6 +1707,7 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
   bool cleanup = true;
   bool hints = true; // for rados bench
   bool inline_small = false; // for rados bench, inline small write
+  bool hint_fast = false; // hint object should be stored in fast dev
   bool no_verify = false;
   bool use_striper = false;
   bool with_clones = false;
@@ -1896,6 +1897,10 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
   i = opts.find("inline");
   if (i != opts.end()) {
     inline_small = true;
+  }
+  i = opts.find("fast");
+  if (i != opts.end()) {
+    hint_fast = true;
   }
   i = opts.find("pretty-format");
   if (i != opts.end()) {
@@ -3182,7 +3187,12 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
       cerr << "couldn't parse expected_write_size: " << err << std::endl;
       usage_exit();
     }
-    ret = io_ctx.set_alloc_hint(oid, expected_object_size, expected_write_size);
+    
+    uint32_t flags = 0;
+    if (hint_fast)
+      flags = ALLOC_HINT_FLAG_FAST_TIER;
+    ret = io_ctx.set_alloc_hint2(oid, expected_object_size, expected_write_size,
+                                flags);
     if (ret < 0) {
       cerr << "error setting alloc-hint " << pool_name << "/" << oid << ": "
            << cpp_strerror(ret) << std::endl;
@@ -3715,6 +3725,8 @@ int main(int argc, const char **argv)
       opts["no-hints"] = "true";
     } else if (ceph_argparse_flag(args, i, "--inline", (char*)NULL)) {
       opts["inline"] = "true";
+    } else if (ceph_argparse_flag(args, i, "--fast", (char*)NULL)) {
+      opts["fast"] = "true";
     } else if (ceph_argparse_flag(args, i, "--no-verify", (char*)NULL)) {
       opts["no-verify"] = "true";
     } else if (ceph_argparse_witharg(args, i, &val, "--run-name", (char*)NULL)) {
