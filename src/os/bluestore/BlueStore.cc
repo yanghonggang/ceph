@@ -10677,7 +10677,6 @@ void BlueStore::_wctx_finish(
     b->discard_unallocated(c.get());
     for (auto e : r) {
       dout(20) << __func__ << "  release " << e << dendl;
-      txc->released.insert(e.offset, e.length);
       uint32_t flags = o->onode.alloc_hint_flags;
       if (flags & CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER) {
 	txc->released_fast.insert(e.get_offset(), e.length);
@@ -11577,6 +11576,7 @@ int BlueStore::_move_data_between_tiers(
 		     uint32_t flags)
 {
   int r = 0;
+  bool fast2slow = true;
 
   uint64_t size = o->onode.size;
   if (size == 0) {
@@ -11593,9 +11593,13 @@ int BlueStore::_move_data_between_tiers(
 
   if (flags & CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER) {
     r = alloc_fast->reserve(txc->preallocated);
+    fast2slow = false;
   } else {
     r = alloc->reserve(txc->preallocated);
   }
+  // FIXME: change level from 5 to 15
+  dout(5) << __func__ << " fast2slow: " << std::boolalpha << fast2slow
+          << std::noboolalpha << dendl;
   if (r < 0)
     goto out;
 
