@@ -4733,13 +4733,13 @@ bool OSDMonitor::preprocess_command(MonOpRequestRef op)
       choices_map_t::const_iterator found = ALL_CHOICES.find(var);
       osd_pool_get_choices selected = found->second;
 
-      if (!p->is_tier() &&
-	  ONLY_TIER_CHOICES.find(selected) != ONLY_TIER_CHOICES.end()) {
-	ss << "pool '" << poolstr
-	   << "' is not a tier pool: variable not applicable";
-	r = -EACCES;
-	goto reply;
-      }
+      // if (!p->is_tier() &&
+      //     ONLY_TIER_CHOICES.find(selected) != ONLY_TIER_CHOICES.end()) {
+      //   ss << "pool '" << poolstr
+      //      << "' is not a tier pool: variable not applicable";
+      //   r = -EACCES;
+      //   goto reply;
+      // }
 
       if (!p->is_erasure() &&
 	  ONLY_ERASURE_CHOICES.find(selected)
@@ -6289,14 +6289,14 @@ int OSDMonitor::prepare_command_pool_set(map<string,cmd_vartype> &cmdmap,
     uf = llrintl(f * (double)1000000.0);
   }
 
-  if (!p.is_tier() &&
-      (var == "hit_set_type" || var == "hit_set_period" ||
-       var == "hit_set_count" || var == "hit_set_fpp" ||
+  if (/*!p.is_tier() &&*/
+      (/*var == "hit_set_type" || var == "hit_set_period" ||
+       var == "hit_set_count" || var == "hit_set_fpp" ||*/
        var == "target_max_objects" || var == "target_max_bytes" ||
        var == "cache_target_full_ratio" || var == "cache_target_dirty_ratio" ||
        var == "cache_target_dirty_high_ratio" || var == "use_gmt_hitset" ||
-       var == "cache_min_flush_age" || var == "cache_min_evict_age" ||
-       var == "hit_set_grade_decay_rate" || var == "hit_set_search_last_n" ||
+       var == "cache_min_flush_age" || var == "cache_min_evict_age" /*||
+       var == "hit_set_grade_decay_rate" || var == "hit_set_search_last_n" */||
        var == "min_read_recency_for_promote" || var == "min_write_recency_for_promote")) {
     return -EACCES;
   }
