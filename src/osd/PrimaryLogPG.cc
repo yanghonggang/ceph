@@ -12995,7 +12995,8 @@ bool PrimaryLogPG::agent_work(int start_max, int agent_flush_quota)
 {
   lock();
   if (!agent_state) {
-    dout(10) << __func__ << " no agent state, stopping" << dendl;
+    // FIXME
+    dout(1) << __func__ << " no agent state, stopping" << dendl;
     unlock();
     return true;
   }
@@ -13003,14 +13004,16 @@ bool PrimaryLogPG::agent_work(int start_max, int agent_flush_quota)
   assert(!deleting);
 
   if (agent_state->is_idle()) {
-    dout(10) << __func__ << " idle, stopping" << dendl;
+    // FIXME
+    dout(1) << __func__ << " idle, stopping" << dendl;
     unlock();
     return true;
   }
 
   osd->logger->inc(l_osd_agent_wake);
 
-  dout(10) << __func__
+  // FIXME
+  dout(1) << __func__
 	   << " max " << start_max
 	   << ", flush " << agent_state->get_flush_mode_name()
 	   << ", evict " << agent_state->get_evict_mode_name()
@@ -13021,8 +13024,11 @@ bool PrimaryLogPG::agent_work(int start_max, int agent_flush_quota)
 
   agent_load_hit_sets();
 
-  const pg_pool_t *base_pool = get_osdmap()->get_pg_pool(pool.info.tier_of);
-  assert(base_pool);
+  const pg_pool_t *base_pool = nullptr;
+  if (pool.info.cache_mode != pg_pool_t::CACHEMODE_LOCAL) {
+    base_pool = get_osdmap()->get_pg_pool(pool.info.tier_of);
+    assert(base_pool);
+  }
 
   int ls_min = 1;
   int ls_max = cct->_conf->osd_pool_default_cache_max_evict_check_size;
@@ -13034,10 +13040,12 @@ bool PrimaryLogPG::agent_work(int start_max, int agent_flush_quota)
   // listing we get back is imprecise.
   vector<hobject_t> ls;
   hobject_t next;
+  // FIXME: only list objects in fast device
   int r = pgbackend->objects_list_partial(agent_state->position, ls_min, ls_max,
 					  &ls, &next);
   assert(r >= 0);
-  dout(20) << __func__ << " got " << ls.size() << " objects" << dendl;
+  //FIXME
+  dout(1) << __func__ << " got " << ls.size() << " objects" << dendl;
   int started = 0;
   for (vector<hobject_t>::iterator p = ls.begin();
        p != ls.end();
@@ -13086,7 +13094,8 @@ bool PrimaryLogPG::agent_work(int start_max, int agent_flush_quota)
     }
 
     // be careful flushing omap to an EC pool.
-    if (!base_pool->supports_omap() &&
+    if ((pool.info.cache_mode != pg_pool_t::CACHEMODE_LOCAL) &&
+        !base_pool->supports_omap() &&
 	obc->obs.oi.is_omap()) {
       dout(20) << __func__ << " skip (omap to EC) " << obc->obs.oi << dendl;
       osd->logger->inc(l_osd_agent_skip);
@@ -13097,9 +13106,17 @@ bool PrimaryLogPG::agent_work(int start_max, int agent_flush_quota)
 	agent_maybe_evict(obc, false))
       ++started;
     else if (agent_state->flush_mode != TierAgentState::FLUSH_MODE_IDLE &&
-             agent_flush_quota > 0 && agent_maybe_flush(obc)) {
-      ++started;
-      --agent_flush_quota;
+             agent_flush_quota > 0) {
+      bool processed = false;
+      if (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL) {
+         processed = agent_maybe_migrate(obc);
+      } else {
+         processed = agent_maybe_flush(obc);
+      }
+      if (processed) {
+        ++started;
+        --agent_flush_quota;
+      }
     }
     if (started >= start_max) {
       // If finishing early, set "next" to the next object
@@ -13202,6 +13219,12 @@ void PrimaryLogPG::agent_load_hit_sets()
       }
     }
   }
+}
+
+bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc)
+{
+  dout(1) << __func__ << " dummy migration: " << obc->obs.oi << dendl;
+  return false;
 }
 
 bool PrimaryLogPG::agent_maybe_flush(ObjectContextRef& obc)
@@ -13407,8 +13430,31 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
   bool requeued = false;
   // FIXME: miration choose mode
   if (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL) {
-    dout(1) << __func__ << this << " cache mode local: dummy choose mode"
-             << dendl;
+    bool old_idle = agent_state->is_idle(); 
+    agent_state->flush_mode = TierAgentState::FLUSH_MODE_LOW;
+
+    dout(1) << __func__ << " " << this << " cache mode local, flush mode slow"
+            << dendl;
+    
+    // TODO: support flush effort caclation
+
+    uint64_t old_effort = agent_state->evict_effort;
+    agent_state->evict_effort = 1000000 / 2 + rand(); // fixed effort
+    // NOTE: we are using evict_effort as a proxy for *all* agent effort
+    // (including flush).  This is probably fine (they should be
+    // correlated) but it is not precisely correct.
+    if (agent_state->is_idle()) {
+      if (!restart && !old_idle) {
+        osd->agent_disable_pg(this, old_effort);
+      }
+    } else {
+      if (restart || old_idle) {
+        osd->agent_enable_pg(this, agent_state->evict_effort);
+      } else if (old_effort != agent_state->evict_effort) {
+        osd->agent_adjust_pg(this, old_effort, agent_state->evict_effort);
+      }
+    }
+
     return requeued;
   }
   // Let delay play out
