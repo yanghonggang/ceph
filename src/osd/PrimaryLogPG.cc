@@ -2466,6 +2466,12 @@ PrimaryLogPG::cache_result_t PrimaryLogPG::maybe_handle_cache_detail(
   if (pool.info.cache_mode == pg_pool_t::CACHEMODE_NONE)
     return cache_result_t::NOOP;
 
+  if (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL) {
+    dout(1) << __func__ << ": ignoring cache due to cache mode local"
+            << dendl;
+    return cache_result_t::NOOP;
+  }
+
   if (op &&
       op->get_req() &&
       op->get_req()->get_type() == CEPH_MSG_OSD_OP &&
@@ -12947,9 +12953,10 @@ void PrimaryLogPG::agent_setup()
   assert(is_locked());
   if (!is_active() ||
       !is_primary() ||
-      pool.info.cache_mode == pg_pool_t::CACHEMODE_NONE ||
+      ((pool.info.cache_mode == pg_pool_t::CACHEMODE_NONE ||
       pool.info.tier_of < 0 ||
-      !get_osdmap()->have_pg_pool(pool.info.tier_of)) {
+      !get_osdmap()->have_pg_pool(pool.info.tier_of)) &&
+      pool.info.cache_mode != pg_pool_t::CACHEMODE_LOCAL)) {
     agent_clear();
     return;
   }
@@ -13398,6 +13405,12 @@ void PrimaryLogPG::agent_choose_mode_restart()
 bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
 {
   bool requeued = false;
+  // FIXME: miration choose mode
+  if (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL) {
+    dout(1) << __func__ << this << " cache mode local: dummy choose mode"
+             << dendl;
+    return requeued;
+  }
   // Let delay play out
   if (agent_state->delaying) {
     dout(20) << __func__ << this << " delaying, ignored" << dendl;

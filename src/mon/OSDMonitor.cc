@@ -11071,18 +11071,24 @@ bool OSDMonitor::prepare_command_impl(MonOpRequestRef op,
       err = -ENOENT;
       goto reply;
     }
-    const pg_pool_t *p = osdmap.get_pg_pool(pool_id);
-    assert(p);
-    if (!p->is_tier()) {
-      ss << "pool '" << poolstr << "' is not a tier";
-      err = -EINVAL;
-      goto reply;
-    }
+
     string modestr;
     cmd_getval(g_ceph_context, cmdmap, "mode", modestr);
     pg_pool_t::cache_mode_t mode = pg_pool_t::get_cache_mode_from_str(modestr);
     if (mode < 0) {
       ss << "'" << modestr << "' is not a valid cache mode";
+      err = -EINVAL;
+      goto reply;
+    }
+    
+    bool skip_tier_check = false;
+    if (mode == pg_pool_t::CACHEMODE_LOCAL)
+      skip_tier_check = true;
+
+    const pg_pool_t *p = osdmap.get_pg_pool(pool_id);
+    assert(p);
+    if (!skip_tier_check && !p->is_tier()) {
+      ss << "pool '" << poolstr << "' is not a tier";
       err = -EINVAL;
       goto reply;
     }
