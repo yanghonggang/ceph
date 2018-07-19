@@ -192,7 +192,7 @@ class PrimaryLogPG::C_OSD_OndiskWriteUnlock : public Context {
     ObjectContextRef o,
     ObjectContextRef o2 = ObjectContextRef(),
     ObjectContextRef o3 = ObjectContextRef(),
-    int *r = NULL) : obc(o), obc2(o2), obc3(o3) {}
+    int *r = NULL) : obc(o), obc2(o2), obc3(o3), rval(r) {}
   void finish(int r) override {
     obc->ondisk_write_unlock();
     if (obc2)
@@ -13223,7 +13223,91 @@ void PrimaryLogPG::agent_load_hit_sets()
 
 bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc)
 {
-  dout(1) << __func__ << " dummy migration: " << obc->obs.oi << dendl;
+  dout(1) << __func__ << " " << obc->obs.oi << dendl;
+  const hobject_t& soid = obc->obs.oi.soid;
+
+  if (!obc->obs.oi.watchers.empty()) {
+    dout(1) << __func__ << " skip (watchers) " << obc->obs.oi << dendl;
+    return false;
+  }
+  if (obc->is_blocked()) {
+    dout(1) << __func__ << " skip (blocked) " << obc->obs.oi << dendl;
+    return false;
+  }
+  if (obc->obs.oi.is_cache_pinned()) {
+    dout(1) << __func__ << " skip (cache_pinned) " << obc->obs.oi << dendl;
+    return false;
+  }
+
+  if (soid.snap == CEPH_NOSNAP) {
+    int result = _verify_no_head_clones(soid, obc->ssc->snapset);
+    if (result < 0) {
+      dout(1) << __func__ << " skip (clones) " << obc->obs.oi << dendl;
+      return false;
+    }
+  }
+
+  // TODO: cache min flush age checking
+  if (osd->agent_is_active_oid(obc->obs.oi.soid)) {
+    dout(1) << __func__ << " skip (flushing) " << obc->obs.oi << dendl;
+    osd->logger->inc(l_osd_agent_skip);
+    return false;
+  }
+
+  // TODO: add counter
+
+  // is this object cold enough?
+  // TODO: evict effort => migrate effort
+  int temp = 0;
+  uint64_t temp_upper = 0, temp_lower = 0;
+  if (hit_set)
+    agent_estimate_temp(soid, &temp);
+  agent_state->temp_hist.add(temp);
+  agent_state->temp_hist.get_position_micro(temp, &temp_lower, &temp_upper);
+  dout(1) << __func__
+          << " temp " << temp
+          << " pos " << temp_lower << "-" << temp_upper
+          << ", evict_effort " << agent_state->evict_effort
+          << dendl;
+  //if (1000000 - temp_upper >= agent_state->evict_effort)
+  //  return false;
+ 
+  // kick off async migration
+  OpContextUPtr ctx = simple_opc_create(obc);
+  if (!ctx->lock_manager.get_lock_type(
+       ObjectContext::RWState::RWWRITE,
+       obc->obs.oi.soid,
+       obc,
+       OpRequestRef())) {
+    close_op_ctx(ctx.release());
+    dout(1) << __func__ << " skip (cannot get lock) " << obc->obs.oi << dendl;
+    return false; 
+  }
+
+  osd->agent_start_op(soid);
+  ctx->at_version = get_next_version();
+  object_info_t& oi = ctx->new_obs.oi;
+
+  finish_ctx(ctx.get(), pg_log_entry_t::MODIFY);
+  ctx->register_on_success(
+    [this, soid]() {
+    osd->agent_finish_op(soid);
+    });
+  PGTransaction *t = ctx->op_t.get();
+  // as we depend on set_alloc_hint to trigger the migration
+  // we can treat this op as 'MODIFY'
+  // ANOTHER way is put one set alloc hit op in sharedwq just like scrub???
+  ////ctx->log.push_back(pg_log_entry_t(pg_log_entry_t::MODIFY, obc->obs.oi.soid,
+  ////                                  ctx->at_version,
+  ////                                  oi.version,
+  ////                                  0,
+  ////                                  osd_reqid_t(), ctx->mtime, 0));
+  oi.alloc_hint_flags |= CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER;
+  t->set_alloc_hint(soid, oi.expected_object_size, oi.expected_write_size,
+                    oi.alloc_hint_flags);
+  ctx->delta_stats.num_wr++;
+  simple_opc_submit(std::move(ctx));
+ 
   return false;
 }
 
