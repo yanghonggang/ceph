@@ -4733,6 +4733,24 @@ struct object_info_t {
   static ps_t legacy_object_locator_to_ps(const object_t &oid, 
 					  const object_locator_t &loc);
 
+  bool test_alloc_hint_flag(uint32_t f) const {
+    return (alloc_hint_flags & f) == f;
+  }
+  bool is_on_tier() const {
+    return test_alloc_hint_flag(CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER);
+  }
+  void set_alloc_hint_flag(uint32_t f) {
+    alloc_hint_flags = (uint32_t)(alloc_hint_flags | f);
+  }
+  void clear_alloc_hint_flag(uint32_t f) {
+    alloc_hint_flags = (uint32_t)(alloc_hint_flags & ~f);
+  }
+  void set_on_tier() {
+    set_alloc_hint_flag(CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER);
+  }
+  void clear_on_tier() {
+    clear_alloc_hint_flag(CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER);
+  }
   bool test_flag(flag_t f) const {
     return (flags & f) == f;
   }

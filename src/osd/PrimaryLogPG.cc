@@ -13108,8 +13108,9 @@ bool PrimaryLogPG::agent_work(int start_max, int agent_flush_quota)
     else if (agent_state->flush_mode != TierAgentState::FLUSH_MODE_IDLE &&
              agent_flush_quota > 0) {
       bool processed = false;
-      if (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL) {
-         processed = agent_maybe_migrate(obc);
+      if ((pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL) &&
+          obc->obs.oi.is_on_tier()) {
+         processed = agent_maybe_migrate(obc, false);
       } else {
          processed = agent_maybe_flush(obc);
       }
@@ -13221,12 +13222,12 @@ void PrimaryLogPG::agent_load_hit_sets()
   }
 }
 
-bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc)
+bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
 {
   dout(1) << __func__ << " " << obc->obs.oi << dendl;
   const hobject_t& soid = obc->obs.oi.soid;
 
-  if (!obc->obs.oi.watchers.empty()) {
+  if (!obc->obs.oi.watchers.empty()) { // FIXME
     dout(1) << __func__ << " skip (watchers) " << obc->obs.oi << dendl;
     return false;
   }
@@ -13239,7 +13240,7 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc)
     return false;
   }
 
-  if (soid.snap == CEPH_NOSNAP) {
+  if (soid.snap == CEPH_NOSNAP) { // FIXME
     int result = _verify_no_head_clones(soid, obc->ssc->snapset);
     if (result < 0) {
       dout(1) << __func__ << " skip (clones) " << obc->obs.oi << dendl;
@@ -13258,20 +13259,21 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc)
 
   // is this object cold enough?
   // TODO: evict effort => migrate effort
-  int temp = 0;
-  uint64_t temp_upper = 0, temp_lower = 0;
-  if (hit_set)
-    agent_estimate_temp(soid, &temp);
-  agent_state->temp_hist.add(temp);
-  agent_state->temp_hist.get_position_micro(temp, &temp_lower, &temp_upper);
-  dout(1) << __func__
-          << " temp " << temp
-          << " pos " << temp_lower << "-" << temp_upper
-          << ", evict_effort " << agent_state->evict_effort
-          << dendl;
-  //if (1000000 - temp_upper >= agent_state->evict_effort)
-  //  return false;
- 
+  if (!promote) { // flush
+    int temp = 0;
+    uint64_t temp_upper = 0, temp_lower = 0;
+    if (hit_set)
+      agent_estimate_temp(soid, &temp);
+    agent_state->temp_hist.add(temp);
+    agent_state->temp_hist.get_position_micro(temp, &temp_lower, &temp_upper);
+    dout(1) << __func__
+            << " temp " << temp
+            << " pos " << temp_lower << "-" << temp_upper
+            << ", evict_effort " << agent_state->evict_effort
+            << dendl;
+    if (1000000 - temp_upper >= agent_state->evict_effort)
+      return false;
+  } 
   // kick off async migration
   OpContextUPtr ctx = simple_opc_create(obc);
   if (!ctx->lock_manager.get_lock_type(
@@ -13302,7 +13304,10 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc)
   ////                                  oi.version,
   ////                                  0,
   ////                                  osd_reqid_t(), ctx->mtime, 0));
-  oi.alloc_hint_flags |= CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER;
+  if (promote)
+    oi.set_on_tier();
+  else
+    oi.clear_on_tier();
   t->set_alloc_hint(soid, oi.expected_object_size, oi.expected_write_size,
                     oi.alloc_hint_flags);
   ctx->delta_stats.num_wr++;

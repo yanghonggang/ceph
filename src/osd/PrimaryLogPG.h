@@ -917,7 +917,8 @@ protected:
     return agent_work(max, max);
   }
   bool agent_work(int max, int agent_flush_quota) override;
-  bool agent_maybe_migrate(ObjectContextRef& obc); ///< maybe migrate 
+  bool agent_maybe_migrate(ObjectContextRef& obc, 
+                           bool promote = false); ///< maybe migrate 
   bool agent_maybe_flush(ObjectContextRef& obc);  ///< maybe flush
   bool agent_maybe_evict(ObjectContextRef& obc, bool after_flush);  ///< maybe evict
 
