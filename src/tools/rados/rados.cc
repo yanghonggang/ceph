@@ -377,7 +377,8 @@ static int do_copy_pool(Rados& rados, const char *src_pool, const char *target_p
 
 static int do_put(IoCtx& io_ctx, RadosStriper& striper,
 		  const char *objname, const char *infile, int op_size,
-		  uint64_t obj_offset, bool use_striper, bool inline_small)
+		  uint64_t obj_offset, bool use_striper, bool inline_small,
+                  bool hint_fast)
 {
   string oid(objname);
   bool stdio = (strcmp(infile, "-") == 0);
@@ -430,19 +431,24 @@ static int do_put(IoCtx& io_ctx, RadosStriper& striper,
       else
 	ret = striper.write(oid, indata, count, offset);
     } else {
+      uint32_t flags = 0;
+      if (hint_fast)
+        flags = ALLOC_HINT_FLAG_FAST_TIER;
       if (inline_small) {
         assert(offset == 0); // inline object only support write_full op
+        flags |= ALLOC_HINT_FLAG_INLINE;
+      }
+      if (inline_small || hint_fast) {
         ret = io_ctx.set_alloc_hint2(oid, indata.length(), indata.length(),
-                                     ALLOC_HINT_FLAG_INLINE);
+                                     flags);
         if (ret < 0)
           goto out;
-        ret = io_ctx.write_full(oid, indata);
-      } else {
-        if (offset == 0)
-          ret = io_ctx.write_full(oid, indata);
-        else
-          ret = io_ctx.write(oid, indata, count, offset);
       }
+
+      if (offset == 0)
+        ret = io_ctx.write_full(oid, indata);
+      else
+        ret = io_ctx.write(oid, indata, count, offset);
     }
 
     if (ret < 0) {
@@ -2358,7 +2364,7 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
     if (!pool_name || nargs.size() < 3)
       usage_exit();
     ret = do_put(io_ctx, striper, nargs[1], nargs[2], op_size, obj_offset,
-                 use_striper, inline_small);
+                 use_striper, inline_small, hint_fast);
     if (ret < 0) {
       cerr << "error putting " << pool_name << "/" << nargs[1] << ": " << cpp_strerror(ret) << std::endl;
       goto out;
