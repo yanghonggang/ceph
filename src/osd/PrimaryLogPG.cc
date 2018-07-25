@@ -2210,6 +2210,13 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
     return;
   }
 
+  if (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL) {
+    uint32_t recency = op->may_write() ? 
+                         pool.info.min_write_recency_for_promote :
+                         pool.info.min_read_recency_for_promote; 
+    maybe_migrate(obc, in_hit_set, recency);
+  }
+
   if (maybe_handle_cache(op,
 			 write_ordered,
 			 obc,
@@ -2675,6 +2682,61 @@ PrimaryLogPG::cache_result_t PrimaryLogPG::maybe_handle_cache_detail(
     assert(0 == "unrecognized cache_mode");
   }
   return cache_result_t::NOOP;
+}
+
+bool PrimaryLogPG::maybe_migrate(ObjectContextRef obc,
+                                 bool in_hit_set,
+                                 uint32_t recency)
+{
+  dout(1) << __func__
+          << " " << obc->obs.oi
+          << ", in_hit_set " << in_hit_set
+          << ", recency " << recency
+          << dendl;
+  switch (recency) {
+  case 0:
+    break;
+  case 1:
+    // Check if in the current hit set
+    if (in_hit_set) {
+      break;
+    } else {
+      // not promoting
+      return false;
+    }
+    break;
+  default:
+    {
+      unsigned count = (int)in_hit_set;
+      if (count) {
+	// Check if in other hit sets
+	const hobject_t& oid = obc->obs.oi.soid;
+	for (map<time_t,HitSetRef>::reverse_iterator itor =
+	       agent_state->hit_set_map.rbegin();
+	     itor != agent_state->hit_set_map.rend();
+	     ++itor) {
+	  if (!itor->second->contains(oid)) {
+	    break;
+	  }
+	  ++count;
+	  if (count >= recency) {
+	    break;
+	  }
+	}
+      }
+      if (count >= recency) {
+	break;
+      }
+      return false;	// not promoting
+    }
+    break;
+  }
+
+  if (osd->promote_throttle()) {
+    dout(1) << __func__ << " promote throttled" << dendl;
+    return false;
+  }
+  return agent_maybe_migrate(obc, true);
 }
 
 bool PrimaryLogPG::maybe_promote(ObjectContextRef obc,

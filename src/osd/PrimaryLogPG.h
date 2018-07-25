@@ -1168,6 +1168,13 @@ protected:
   }
 
   /**
+   * Trigger a synchronous migration if needed. 
+   */
+  bool maybe_migrate(ObjectContextRef obc,
+                     bool in_hit_set,
+                     uint32_t recency);
+
+  /**
    * This helper function checks if a promotion is needed.
    */
   bool maybe_promote(ObjectContextRef obc,
