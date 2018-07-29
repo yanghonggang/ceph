@@ -1943,11 +1943,13 @@ void object_stat_sum_t::dump(Formatter *f) const
   f->dump_int("num_evict_mode_full", num_evict_mode_full);
   f->dump_int("num_objects_pinned", num_objects_pinned);
   f->dump_int("num_legacy_snapsets", num_legacy_snapsets);
+  f->dump_int("num_bytes_fast", num_bytes_fast);
+  f->dump_int("num_objects_fast", num_objects_fast);
 }
 
 void object_stat_sum_t::encode(bufferlist& bl) const
 {
-  ENCODE_START(16, 14, bl);
+  ENCODE_START(17, 14, bl);
 #if defined(CEPH_LITTLE_ENDIAN)
   bl.append((char *)(&num_bytes), sizeof(object_stat_sum_t));
 #else
@@ -1986,6 +1988,8 @@ void object_stat_sum_t::encode(bufferlist& bl) const
   ::encode(num_objects_pinned, bl);
   ::encode(num_objects_missing, bl);
   ::encode(num_legacy_snapsets, bl);
+  ::encode(num_bytes_fast, bl);
+  ::encode(num_objects_fast, bl);
 #endif
   ENCODE_FINISH(bl);
 }
@@ -2039,6 +2043,10 @@ void object_stat_sum_t::decode(bufferlist::iterator& bl)
       ::decode(num_legacy_snapsets, bl);
     } else {
       num_legacy_snapsets = num_object_clones;  // upper bound
+    }
+    if (struct_v >= 17) {
+      ::decode(num_bytes_fast, bl);
+      ::decode(num_objects_fast, bl);
     }
   }
   DECODE_FINISH(bl);
@@ -2119,6 +2127,8 @@ void object_stat_sum_t::add(const object_stat_sum_t& o)
   num_evict_mode_full += o.num_evict_mode_full;
   num_objects_pinned += o.num_objects_pinned;
   num_legacy_snapsets += o.num_legacy_snapsets;
+  num_bytes_fast += o.num_bytes_fast;
+  num_objects_fast += o.num_objects_fast;
 }
 
 void object_stat_sum_t::sub(const object_stat_sum_t& o)
@@ -2158,6 +2168,8 @@ void object_stat_sum_t::sub(const object_stat_sum_t& o)
   num_evict_mode_full -= o.num_evict_mode_full;
   num_objects_pinned -= o.num_objects_pinned;
   num_legacy_snapsets -= o.num_legacy_snapsets;
+  num_bytes_fast -= o.num_bytes_fast;
+  num_objects_fast -= o.num_objects_fast;
 }
 
 bool operator==(const object_stat_sum_t& l, const object_stat_sum_t& r)
@@ -2197,7 +2209,9 @@ bool operator==(const object_stat_sum_t& l, const object_stat_sum_t& r)
     l.num_evict_mode_some == r.num_evict_mode_some &&
     l.num_evict_mode_full == r.num_evict_mode_full &&
     l.num_objects_pinned == r.num_objects_pinned &&
-    l.num_legacy_snapsets == r.num_legacy_snapsets;
+    l.num_legacy_snapsets == r.num_legacy_snapsets &&
+    l.num_bytes_fast == r.num_bytes_fast &&
+    l.num_objects_fast == r.num_objects_fast;
 }
 
 // -- object_stat_collection_t --

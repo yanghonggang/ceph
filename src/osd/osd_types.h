@@ -1662,6 +1662,8 @@ struct object_stat_sum_t {
   int64_t num_objects_pinned;
   int64_t num_objects_missing;
   int64_t num_legacy_snapsets; ///< upper bound on pre-luminous-style SnapSets
+  int64_t num_bytes_fast;    // objects in bytes on fast tier
+  int64_t num_objects_fast; // number of objects on fast tier
 
   object_stat_sum_t()
     : num_bytes(0),
@@ -1690,7 +1692,9 @@ struct object_stat_sum_t {
       num_evict_mode_some(0), num_evict_mode_full(0),
       num_objects_pinned(0),
       num_objects_missing(0),
-      num_legacy_snapsets(0)
+      num_legacy_snapsets(0),
+      num_bytes_fast(0),
+      num_objects_fast(0)
   {}
 
   void floor(int64_t f) {
@@ -1730,6 +1734,8 @@ struct object_stat_sum_t {
     FLOOR(num_evict_mode_full);
     FLOOR(num_objects_pinned);
     FLOOR(num_legacy_snapsets);
+    FLOOR(num_bytes_fast);
+    FLOOR(num_objects_fast);
 #undef FLOOR
   }
 
@@ -1787,6 +1793,8 @@ struct object_stat_sum_t {
     SPLIT(num_evict_mode_full);
     SPLIT(num_objects_pinned);
     SPLIT_PRESERVE_NONZERO(num_legacy_snapsets);
+    SPLIT(num_bytes_fast);
+    SPLIT(num_objects_fast);
 #undef SPLIT
 #undef SPLIT_PRESERVE_NONZERO
   }
@@ -1844,7 +1852,9 @@ struct object_stat_sum_t {
         sizeof(num_evict_mode_full) +
         sizeof(num_objects_pinned) +
         sizeof(num_objects_missing) +
-        sizeof(num_legacy_snapsets)
+        sizeof(num_legacy_snapsets) +
+        sizeof(num_bytes_fast) +
+        sizeof(num_objects_fast)
       ,
       "object_stat_sum_t have padding");
   }

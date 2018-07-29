@@ -3863,7 +3863,8 @@ int PrimaryLogPG::trim_object(
   
     snapid_t last = coid.snap;
     ctx->delta_stats.num_bytes -= snapset.get_clone_bytes(last);
-
+    if (coi.is_on_tier())
+      ctx->delta_stats.num_bytes_fast -= snapset.get_clone_bytes(last);
     if (p != snapset.clones.begin()) {
       // not the oldest... merge overlap into next older clone
       vector<snapid_t>::iterator n = p - 1;
@@ -3874,13 +3875,20 @@ int PrimaryLogPG::trim_object(
       if (adjust_prev_bytes)
 	ctx->delta_stats.num_bytes -= snapset.get_clone_bytes(*n);
 
+      if (coi.is_on_tier())
+        ctx->delta_stats.num_bytes -= snapset.get_clone_bytes(*n);
+
       snapset.clone_overlap[*n].intersection_of(
 	snapset.clone_overlap[*p]);
 
       if (adjust_prev_bytes)
 	ctx->delta_stats.num_bytes += snapset.get_clone_bytes(*n);
+      if (coi.is_on_tier())
+        ctx->delta_stats.num_bytes -= snapset.get_clone_bytes(*n);
     }
     ctx->delta_stats.num_objects--;
+    if (coi.is_on_tier())
+      ctx->delta_stats.num_objects_fast--;
     if (coi.is_dirty())
       ctx->delta_stats.num_objects_dirty--;
     if (coi.is_omap())
@@ -3984,6 +3992,9 @@ int PrimaryLogPG::trim_object(
       derr << "removing snap head" << dendl;
       object_info_t& oi = ctx->snapset_obc->obs.oi;
       ctx->delta_stats.num_objects--;
+      if (oi.is_on_tier()) {
+        ctx->delta_stats.num_objects_fast--;
+      }
       if (oi.is_dirty()) {
 	ctx->delta_stats.num_objects_dirty--;
       }
@@ -4549,6 +4560,8 @@ void PrimaryLogPG::maybe_create_new_object(
     obs.oi.new_object();
     if (!ignore_transaction)
       ctx->op_t->create(obs.oi.soid);
+    if (obs.oi.is_on_tier())
+      ctx->delta_stats.num_objects_fast++;
   } else if (obs.oi.is_whiteout()) {
     dout(10) << __func__ << " clearing whiteout on " << obs.oi.soid << dendl;
     ctx->new_obs.oi.clear_flag(object_info_t::FLAG_WHITEOUT);
@@ -5836,10 +5849,13 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       ++ctx->num_write;
       {
 	tracepoint(osd, do_osd_op_pre_setallochint, soid.oid.name.c_str(), soid.snap.val, op.alloc_hint.expected_object_size, op.alloc_hint.expected_write_size);
-	maybe_create_new_object(ctx);
+        // Note: set alloc_hint_flag before call maybe_create_new_object()
+        //       so we can know whether this is a object should be stored
+        //       on fast device
 	oi.expected_object_size = op.alloc_hint.expected_object_size;
 	oi.expected_write_size = op.alloc_hint.expected_write_size;
 	oi.alloc_hint_flags = op.alloc_hint.flags;
+	maybe_create_new_object(ctx);
         t->set_alloc_hint(soid, op.alloc_hint.expected_object_size,
                           op.alloc_hint.expected_write_size,
 			  op.alloc_hint.flags);
@@ -5905,6 +5921,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	      ctx->delta_stats.num_bytes -= oi.size;
 	      ctx->delta_stats.num_bytes += op.extent.truncate_size;
 	      oi.size = op.extent.truncate_size;
+              if (oi.is_on_tier()) {
+                ctx->delta_stats.num_bytes_fast -= oi.size;
+                ctx->delta_stats.num_bytes_fast += op.extent.truncate_size;
+              }
 	    }
 	  } else {
 	    dout(10) << " truncate_seq " << op.extent.truncate_seq << " > current " << seq
@@ -6087,6 +6107,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	  ctx->delta_stats.num_bytes -= oi.size;
 	  ctx->delta_stats.num_bytes += op.extent.offset;
 	  oi.size = op.extent.offset;
+          if (oi.is_on_tier()) {
+            ctx->delta_stats.num_bytes_fast -= oi.size;
+            ctx->delta_stats.num_bytes_fast += op.extent.offset;
+          }
 	}
 	ctx->delta_stats.num_wr++;
 	// do no set exists, or we will break above DELETE -> TRUNCATE munging.
@@ -6282,6 +6306,8 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	  obs.oi.clear_flag(object_info_t::FLAG_OMAP);
 	}
 	ctx->delta_stats.num_bytes -= oi.size;
+        if (oi.is_on_tier())
+          ctx->delta_stats.num_bytes_fast -= oi.size;
 	oi.size = 0;
 	oi.new_object();
 	oi.user_version = target_version;
@@ -6993,8 +7019,12 @@ inline int PrimaryLogPG::_delete_oid(
   if (soid.is_snap()) {
     assert(ctx->obc->ssc->snapset.clone_overlap.count(soid.snap));
     ctx->delta_stats.num_bytes -= ctx->obc->ssc->snapset.get_clone_bytes(soid.snap);
+    if (oi.is_on_tier())
+      ctx->delta_stats.num_bytes_fast -= ctx->obc->ssc->snapset.get_clone_bytes(soid.snap);
   } else {
     ctx->delta_stats.num_bytes -= oi.size;
+    if (oi.is_on_tier())
+      ctx->delta_stats.num_bytes_fast -= oi.size;
   }
   oi.size = 0;
   oi.new_object();
@@ -7021,6 +7051,8 @@ inline int PrimaryLogPG::_delete_oid(
 
   // delete the head
   ctx->delta_stats.num_objects--;
+  if (oi.is_on_tier())
+    ctx->delta_stats.num_objects_fast--;
   if (soid.is_snap())
     ctx->delta_stats.num_object_clones--;
   if (oi.is_whiteout()) {
@@ -7163,6 +7195,10 @@ int PrimaryLogPG::_rollback_to(OpContext *ctx, ceph_osd_op& op)
       maybe_create_new_object(ctx, true);
       ctx->delta_stats.num_bytes -= obs.oi.size;
       ctx->delta_stats.num_bytes += rollback_to->obs.oi.size;
+      if (obs.oi.is_on_tier())
+        ctx->delta_stats.num_bytes_fast -= obs.oi.size;
+      if (rollback_to->obs.oi.is_on_tier())
+        ctx->delta_stats.num_bytes_fast += rollback_to->obs.oi.size;
       obs.oi.size = rollback_to->obs.oi.size;
       if (rollback_to->obs.oi.is_data_digest())
 	obs.oi.set_data_digest(rollback_to->obs.oi.data_digest);
@@ -7306,6 +7342,8 @@ void PrimaryLogPG::make_writeable(OpContext *ctx)
     _make_clone(ctx, ctx->op_t.get(), ctx->clone_obc, soid, coid, snap_oi);
     
     ctx->delta_stats.num_objects++;
+    if (snap_oi->is_on_tier())
+      ctx->delta_stats.num_objects_fast++;
     if (snap_oi->is_dirty()) {
       ctx->delta_stats.num_objects_dirty++;
       osd->logger->inc(l_osd_tier_dirty);
@@ -7351,6 +7389,7 @@ void PrimaryLogPG::make_writeable(OpContext *ctx)
       interval_set<uint64_t> &newest_overlap = ctx->new_snapset.clone_overlap.rbegin()->second;
       ctx->modified_ranges.intersection_of(newest_overlap);
       // modified_ranges is still in use by the clone
+      // FIXME: TODO
       add_interval_usage(ctx->modified_ranges, ctx->delta_stats);
       newest_overlap.subtract(ctx->modified_ranges);
     }
@@ -7384,9 +7423,14 @@ void PrimaryLogPG::write_update_size_and_usage(object_stat_sum_t& delta_stats, o
   modified.union_of(ch);
   if (write_full || offset + length > oi.size) {
     uint64_t new_size = offset + length;
+    uint64_t old_size = oi.size;
     delta_stats.num_bytes -= oi.size;
     delta_stats.num_bytes += new_size;
     oi.size = new_size;
+    if (oi.is_on_tier()) {
+      delta_stats.num_bytes_fast -= old_size;
+      delta_stats.num_bytes_fast += new_size;
+    }
   }
   delta_stats.num_wr++;
   delta_stats.num_wr_kb += SHIFT_ROUND_UP(length, 10);
@@ -8534,6 +8578,10 @@ void PrimaryLogPG::finish_copyfrom(CopyFromCallback *cb)
     ctx->delta_stats.num_bytes -= obs.oi.size;
     obs.oi.size = cb->get_data_size();
     ctx->delta_stats.num_bytes += obs.oi.size;
+    if (obs.oi.is_on_tier()) {
+      ctx->delta_stats.num_bytes_fast -= obs.oi.size;
+      ctx->delta_stats.num_bytes_fast += obs.oi.size;
+    }
   }
   ctx->delta_stats.num_wr++;
   ctx->delta_stats.num_wr_kb += SHIFT_ROUND_UP(obs.oi.size, 10);
@@ -10294,6 +10342,10 @@ void PrimaryLogPG::add_object_context_to_pg_stat(ObjectContextRef obc, pg_stat_t
 
   if (oi.soid.snap != CEPH_SNAPDIR)
     stat.num_objects++;
+  if (oi.is_on_tier()) {
+    stat.num_bytes_fast += oi.size;
+    stat.num_objects_fast++;
+  }
   if (oi.is_dirty())
     stat.num_objects_dirty++;
   if (oi.is_whiteout())
@@ -10313,10 +10365,13 @@ void PrimaryLogPG::add_object_context_to_pg_stat(ObjectContextRef obc, pg_stat_t
     // subtract off clone overlap
     if (obc->ssc->snapset.clone_overlap.count(oi.soid.snap)) {
       interval_set<uint64_t>& o = obc->ssc->snapset.clone_overlap[oi.soid.snap];
+      bool on_tier = oi.is_on_tier();
       for (interval_set<uint64_t>::const_iterator r = o.begin();
 	   r != o.end();
 	   ++r) {
 	stat.num_bytes -= r.get_len();
+        if (on_tier)
+          stat.num_bytes_fast -= r.get_len();
       }	  
     }
   }
@@ -12928,8 +12983,10 @@ void PrimaryLogPG::hit_set_persist()
   ctx->new_snapset = obc->ssc->snapset;
 
   ctx->delta_stats.num_objects++;
+  ctx->delta_stats.num_objects_fast++;
   ctx->delta_stats.num_objects_hit_set_archive++;
   ctx->delta_stats.num_bytes += bl.length();
+  ctx->delta_stats.num_bytes_fast += bl.length();
   ctx->delta_stats.num_bytes_hit_set_archive += bl.length();
 
   bufferlist bss;
@@ -12993,8 +13050,10 @@ void PrimaryLogPG::hit_set_trim(OpContextUPtr &ctx, unsigned max)
     ObjectContextRef obc = get_object_context(oid, false);
     assert(obc);
     --ctx->delta_stats.num_objects;
+    --ctx->delta_stats.num_objects_fast;
     --ctx->delta_stats.num_objects_hit_set_archive;
     ctx->delta_stats.num_bytes -= obc->obs.oi.size;
+    ctx->delta_stats.num_bytes_fast -= obc->obs.oi.size;
     ctx->delta_stats.num_bytes_hit_set_archive -= obc->obs.oi.size;
   }
 }
@@ -13669,13 +13728,15 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
   if (!local_mode && !base_pool->supports_omap())
     unflushable += info.stats.stats.sum.num_objects_omap;
 
-  uint64_t num_user_objects = info.stats.stats.sum.num_objects;
+  uint64_t num_user_objects = local_mode ? info.stats.stats.sum.num_objects_fast :
+    info.stats.stats.sum.num_objects;
   if (num_user_objects > unflushable)
     num_user_objects -= unflushable;
   else
     num_user_objects = 0;
 
-  uint64_t num_user_bytes = info.stats.stats.sum.num_bytes;
+  uint64_t num_user_bytes = local_mode ? info.stats.stats.sum.num_bytes_fast :
+    info.stats.stats.sum.num_bytes;
   uint64_t unflushable_bytes = info.stats.stats.sum.num_bytes_hit_set_archive;
   num_user_bytes -= unflushable_bytes;
   uint64_t num_overhead_bytes = osd->store->estimate_objects_overhead(num_user_objects);
@@ -13696,7 +13757,9 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
 	   << " evict_mode: "
 	   << TierAgentState::get_evict_mode_name(agent_state->evict_mode)
 	   << " num_objects: " << info.stats.stats.sum.num_objects
+	   << " num_objects_fast: " << info.stats.stats.sum.num_objects_fast
 	   << " num_bytes: " << info.stats.stats.sum.num_bytes
+	   << " num_bytes_fast: " << info.stats.stats.sum.num_bytes_fast
 	   << " num_objects_dirty: " << info.stats.stats.sum.num_objects_dirty
 	   << " num_objects_omap: " << info.stats.stats.sum.num_objects_omap
 	   << " num_dirty: " << num_dirty
@@ -14139,6 +14202,10 @@ void PrimaryLogPG::scrub_snapshot_metadata(
       if (!soid.is_snap()) {
 	stat.num_bytes += oi->size;
       }
+      if (oi->is_on_tier()) {
+        stat.num_bytes_fast += oi->size;
+        stat.num_objects_fast++;
+      }
       if (soid.nspace == cct->_conf->osd_hit_set_namespace)
 	stat.num_bytes_hit_set_archive += oi->size;
 
@@ -14352,6 +14419,8 @@ void PrimaryLogPG::scrub_snapshot_metadata(
 	    soid_error.set_size_mismatch();
 	  } else {
             stat.num_bytes += snapset->get_clone_bytes(soid.snap);
+            if (oi->is_on_tier())
+              stat.num_bytes_fast += snapset->get_clone_bytes(soid.snap);
 	  }
         }
       }
@@ -14546,16 +14615,19 @@ void PrimaryLogPG::_scrub_finish()
 
   dout(10) << mode << " got "
 	   << scrub_cstat.sum.num_objects << "/" << info.stats.stats.sum.num_objects << " objects, "
+	   << scrub_cstat.sum.num_objects_fast << "/" << info.stats.stats.sum.num_objects_fast << " fast objects, "
 	   << scrub_cstat.sum.num_object_clones << "/" << info.stats.stats.sum.num_object_clones << " clones, "
 	   << scrub_cstat.sum.num_objects_dirty << "/" << info.stats.stats.sum.num_objects_dirty << " dirty, "
 	   << scrub_cstat.sum.num_objects_omap << "/" << info.stats.stats.sum.num_objects_omap << " omap, "
 	   << scrub_cstat.sum.num_objects_pinned << "/" << info.stats.stats.sum.num_objects_pinned << " pinned, "
 	   << scrub_cstat.sum.num_objects_hit_set_archive << "/" << info.stats.stats.sum.num_objects_hit_set_archive << " hit_set_archive, "
 	   << scrub_cstat.sum.num_bytes << "/" << info.stats.stats.sum.num_bytes << " bytes, "
+	   << scrub_cstat.sum.num_bytes_fast << "/" << info.stats.stats.sum.num_bytes_fast << " fast bytes, "
 	   << scrub_cstat.sum.num_bytes_hit_set_archive << "/" << info.stats.stats.sum.num_bytes_hit_set_archive << " hit_set_archive bytes."
 	   << dendl;
 
   if (scrub_cstat.sum.num_objects != info.stats.stats.sum.num_objects ||
+      scrub_cstat.sum.num_objects_fast != info.stats.stats.sum.num_objects_fast ||
       scrub_cstat.sum.num_object_clones != info.stats.stats.sum.num_object_clones ||
       (scrub_cstat.sum.num_objects_dirty != info.stats.stats.sum.num_objects_dirty &&
        !info.stats.dirty_stats_invalid) ||
@@ -14568,10 +14640,12 @@ void PrimaryLogPG::_scrub_finish()
       (scrub_cstat.sum.num_bytes_hit_set_archive != info.stats.stats.sum.num_bytes_hit_set_archive &&
        !info.stats.hitset_bytes_stats_invalid) ||
       scrub_cstat.sum.num_whiteouts != info.stats.stats.sum.num_whiteouts ||
-      scrub_cstat.sum.num_bytes != info.stats.stats.sum.num_bytes) {
+      scrub_cstat.sum.num_bytes != info.stats.stats.sum.num_bytes ||
+      scrub_cstat.sum.num_bytes_fast != info.stats.stats.sum.num_bytes_fast) {
     osd->clog->error() << info.pgid << " " << mode
 		      << " stat mismatch, got "
 		      << scrub_cstat.sum.num_objects << "/" << info.stats.stats.sum.num_objects << " objects, "
+		      << scrub_cstat.sum.num_objects_fast << "/" << info.stats.stats.sum.num_objects_fast << " fast objects, "
 		      << scrub_cstat.sum.num_object_clones << "/" << info.stats.stats.sum.num_object_clones << " clones, "
 		      << scrub_cstat.sum.num_objects_dirty << "/" << info.stats.stats.sum.num_objects_dirty << " dirty, "
 		      << scrub_cstat.sum.num_objects_omap << "/" << info.stats.stats.sum.num_objects_omap << " omap, "
@@ -14579,6 +14653,7 @@ void PrimaryLogPG::_scrub_finish()
 		      << scrub_cstat.sum.num_objects_hit_set_archive << "/" << info.stats.stats.sum.num_objects_hit_set_archive << " hit_set_archive, "
 		      << scrub_cstat.sum.num_whiteouts << "/" << info.stats.stats.sum.num_whiteouts << " whiteouts, "
 		      << scrub_cstat.sum.num_bytes << "/" << info.stats.stats.sum.num_bytes << " bytes, "
+		      << scrub_cstat.sum.num_bytes_fast << "/" << info.stats.stats.sum.num_bytes_fast << " fast bytes, "
 		      << scrub_cstat.sum.num_bytes_hit_set_archive << "/" << info.stats.stats.sum.num_bytes_hit_set_archive << " hit_set_archive bytes.";
     ++scrubber.shallow_errors;
 
