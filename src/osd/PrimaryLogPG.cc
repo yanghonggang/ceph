@@ -6985,8 +6985,10 @@ inline int PrimaryLogPG::_delete_oid(
   PGTransaction* t = ctx->op_t.get();
 
   // cache: cache: set whiteout on delete?
+  // don't whiteout in CACHEMODE_LOCAL
   bool whiteout = false;
-  if (pool.info.cache_mode != pg_pool_t::CACHEMODE_NONE
+  if (pool.info.cache_mode != pg_pool_t::CACHEMODE_LOCAL &&
+      pool.info.cache_mode != pg_pool_t::CACHEMODE_NONE
       && !no_whiteout
       && !try_no_whiteout) {
     whiteout = true;
