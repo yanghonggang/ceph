@@ -5849,6 +5849,17 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       ++ctx->num_write;
       {
 	tracepoint(osd, do_osd_op_pre_setallochint, soid.oid.name.c_str(), soid.snap.val, op.alloc_hint.expected_object_size, op.alloc_hint.expected_write_size);
+        if (obs.exists && ((oi.alloc_hint_flags ^ op.alloc_hint.flags) &
+            CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER)) {
+          // migrate from fast dev to slow dev
+          if (oi.alloc_hint_flags & CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER) {
+            ctx->delta_stats.num_bytes_fast -= oi.size;
+            ctx->delta_stats.num_objects_fast--;
+          } else {
+            ctx->delta_stats.num_bytes_fast += oi.size;
+            ctx->delta_stats.num_objects_fast++;
+          }
+        }
         // Note: set alloc_hint_flag before call maybe_create_new_object()
         //       so we can know whether this is a object should be stored
         //       on fast device
@@ -12983,10 +12994,8 @@ void PrimaryLogPG::hit_set_persist()
   ctx->new_snapset = obc->ssc->snapset;
 
   ctx->delta_stats.num_objects++;
-  ctx->delta_stats.num_objects_fast++;
   ctx->delta_stats.num_objects_hit_set_archive++;
   ctx->delta_stats.num_bytes += bl.length();
-  ctx->delta_stats.num_bytes_fast += bl.length();
   ctx->delta_stats.num_bytes_hit_set_archive += bl.length();
 
   bufferlist bss;
@@ -13050,10 +13059,8 @@ void PrimaryLogPG::hit_set_trim(OpContextUPtr &ctx, unsigned max)
     ObjectContextRef obc = get_object_context(oid, false);
     assert(obc);
     --ctx->delta_stats.num_objects;
-    --ctx->delta_stats.num_objects_fast;
     --ctx->delta_stats.num_objects_hit_set_archive;
     ctx->delta_stats.num_bytes -= obc->obs.oi.size;
-    ctx->delta_stats.num_bytes_fast -= obc->obs.oi.size;
     ctx->delta_stats.num_bytes_hit_set_archive -= obc->obs.oi.size;
   }
 }
@@ -13347,7 +13354,9 @@ void PrimaryLogPG::agent_load_hit_sets()
 
 bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
 {
-  dout(1) << __func__ << " " << obc->obs.oi << dendl;
+  dout(1) << __func__ << " " << obc->obs.oi
+          << ", promote " << promote
+          << dendl;
   const hobject_t& soid = obc->obs.oi.soid;
 
   if (!obc->obs.oi.watchers.empty()) { // FIXME
@@ -13416,6 +13425,13 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
         return false;
     }
   }
+
+  // already in the right dev?
+  bool fast = (obc->obs.oi.alloc_hint_flags &
+               CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER);
+  if (promote == fast)
+    return true;
+
   // kick off async migration
   OpContextUPtr ctx = simple_opc_create(obc);
   if (!ctx->lock_manager.get_lock_type(
@@ -13428,9 +13444,9 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
     return false; 
   }
 
+  object_info_t& oi = ctx->new_obs.oi;
   osd->agent_start_op(soid);
   ctx->at_version = get_next_version();
-  object_info_t& oi = ctx->new_obs.oi;
 
   finish_ctx(ctx.get(), pg_log_entry_t::MODIFY);
   ctx->register_on_success(
@@ -13446,16 +13462,21 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
   ////                                  oi.version,
   ////                                  0,
   ////                                  osd_reqid_t(), ctx->mtime, 0));
-  if (promote)
+  if (promote) {
+    ctx->delta_stats.num_bytes_fast += oi.size;
+    ctx->delta_stats.num_objects_fast++;
     oi.set_on_tier();
-  else
+  } else {
+    ctx->delta_stats.num_bytes_fast -= oi.size;
+    ctx->delta_stats.num_objects_fast--;
     oi.clear_on_tier();
+  }
   t->set_alloc_hint(soid, oi.expected_object_size, oi.expected_write_size,
                     oi.alloc_hint_flags);
   ctx->delta_stats.num_wr++;
   simple_opc_submit(std::move(ctx));
  
-  return false;
+  return true;
 }
 
 bool PrimaryLogPG::agent_maybe_flush(ObjectContextRef& obc)
@@ -13720,7 +13741,8 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
   // adjust (effective) user objects down based on the number
   // of HitSet objects, which should not count toward our total since
   // they cannot be flushed.
-  uint64_t unflushable = info.stats.stats.sum.num_objects_hit_set_archive;
+  uint64_t unflushable = local_mode ? 0 :
+                           info.stats.stats.sum.num_objects_hit_set_archive;
 
   // also exclude omap objects if ec backing pool
   const pg_pool_t *base_pool = get_osdmap()->get_pg_pool(pool.info.tier_of);
