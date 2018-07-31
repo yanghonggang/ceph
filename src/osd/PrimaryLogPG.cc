@@ -3876,7 +3876,7 @@ int PrimaryLogPG::trim_object(
 	ctx->delta_stats.num_bytes -= snapset.get_clone_bytes(*n);
 
       if (coi.is_on_tier())
-        ctx->delta_stats.num_bytes -= snapset.get_clone_bytes(*n);
+        ctx->delta_stats.num_bytes_fast -= snapset.get_clone_bytes(*n);
 
       snapset.clone_overlap[*n].intersection_of(
 	snapset.clone_overlap[*p]);
@@ -3884,7 +3884,7 @@ int PrimaryLogPG::trim_object(
       if (adjust_prev_bytes)
 	ctx->delta_stats.num_bytes += snapset.get_clone_bytes(*n);
       if (coi.is_on_tier())
-        ctx->delta_stats.num_bytes -= snapset.get_clone_bytes(*n);
+        ctx->delta_stats.num_bytes_fast += snapset.get_clone_bytes(*n);
     }
     ctx->delta_stats.num_objects--;
     if (coi.is_on_tier())
@@ -8591,10 +8591,6 @@ void PrimaryLogPG::finish_copyfrom(CopyFromCallback *cb)
     ctx->delta_stats.num_bytes -= obs.oi.size;
     obs.oi.size = cb->get_data_size();
     ctx->delta_stats.num_bytes += obs.oi.size;
-    if (obs.oi.is_on_tier()) {
-      ctx->delta_stats.num_bytes_fast -= obs.oi.size;
-      ctx->delta_stats.num_bytes_fast += obs.oi.size;
-    }
   }
   ctx->delta_stats.num_wr++;
   ctx->delta_stats.num_wr_kb += SHIFT_ROUND_UP(obs.oi.size, 10);
