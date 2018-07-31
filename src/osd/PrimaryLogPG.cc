@@ -13443,6 +13443,9 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
   }
 
   object_info_t& oi = ctx->new_obs.oi;
+  // change hint flags to trigger a migration
+  oi.alloc_hint_flags ^= CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER;
+
   osd->agent_start_op(soid);
   ctx->at_version = get_next_version();
 
@@ -13844,13 +13847,17 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
   }
 
   // evict mode
-  uint64_t evict_target = pool.info.cache_target_full_ratio_micro;
+  uint64_t evict_target = local_mode ?
+                            pool.info.cache_target_dirty_ratio_micro :
+                            pool.info.cache_target_full_ratio_micro;
   uint64_t evict_slop = (float)evict_target * cct->_conf->osd_agent_slop;
   if (restart || agent_state->evict_mode == TierAgentState::EVICT_MODE_IDLE)
     evict_target += evict_slop;
   else
     evict_target -= MIN(evict_target, evict_slop);
 
+  // in local mode, always calculate evict_effort, as we depend on this val
+  // to do flush job
   if (full_micro > 1000000) {
     // evict anything clean
     evict_mode = TierAgentState::EVICT_MODE_FULL;
@@ -13873,6 +13880,10 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
     assert(evict_effort >= inc && evict_effort <= 1000000);
     dout(1) << __func__ << " evict_effort " << was << " quantized by " << inc << " to " << evict_effort << dendl;
   }
+    dout(1) << __func__ << " evict_effort " << evict_effort
+            << ", full_micro " << full_micro
+            << ", evict_target " << evict_target
+            << dendl;
   }
 
   skip_calc:
