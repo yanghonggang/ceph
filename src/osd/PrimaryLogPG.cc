@@ -13761,7 +13761,8 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
 
   uint64_t num_user_bytes = local_mode ? info.stats.stats.sum.num_bytes_fast :
     info.stats.stats.sum.num_bytes;
-  uint64_t unflushable_bytes = info.stats.stats.sum.num_bytes_hit_set_archive;
+  uint64_t unflushable_bytes = local_mode ? 0 :
+                                 info.stats.stats.sum.num_bytes_hit_set_archive;
   num_user_bytes -= unflushable_bytes;
   uint64_t num_overhead_bytes = osd->store->estimate_objects_overhead(num_user_objects);
   num_user_bytes += num_overhead_bytes;
