@@ -1207,6 +1207,7 @@ void pg_pool_t::dump(Formatter *f) const
 		   cache_target_dirty_high_ratio_micro);
   f->dump_unsigned("cache_target_full_ratio_micro",
 		   cache_target_full_ratio_micro);
+  f->dump_bool("cache_local_mode_default_fast", cache_local_mode_default_fast);
   f->dump_unsigned("cache_min_flush_age", cache_min_flush_age);
   f->dump_unsigned("cache_min_evict_age", cache_min_evict_age);
   f->dump_string("erasure_code_profile", erasure_code_profile);
@@ -1538,7 +1539,7 @@ void pg_pool_t::encode(bufferlist& bl, uint64_t features) const
     return;
   }
 
-  uint8_t v = 26;
+  uint8_t v = 27;
   if (!(features & CEPH_FEATURE_NEW_OSDOP_ENCODING)) {
     // this was the first post-hammer thing we added; if it's missing, encode
     // like hammer.
@@ -1613,6 +1614,9 @@ void pg_pool_t::encode(bufferlist& bl, uint64_t features) const
   }
   if (v >= 26) {
     ::encode(application_metadata, bl);
+  }
+  if (v >= 27) {
+    ::encode(cache_local_mode_default_fast, bl);
   }
   ENCODE_FINISH(bl);
 }
@@ -1768,6 +1772,9 @@ void pg_pool_t::decode(bufferlist::iterator& bl)
   }
   if (struct_v >= 26) {
     ::decode(application_metadata, bl);
+  }
+  if (struct_v >= 27) {
+    ::decode(cache_local_mode_default_fast, bl);
   }
   DECODE_FINISH(bl);
   calc_pg_masks();

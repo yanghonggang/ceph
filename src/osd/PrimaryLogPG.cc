@@ -4560,6 +4560,14 @@ void PrimaryLogPG::maybe_create_new_object(
     obs.oi.new_object();
     if (!ignore_transaction)
       ctx->op_t->create(obs.oi.soid);
+    if (pool.info.cache_local_mode_default_fast) {
+      // force create on fast device
+      obs.oi.set_on_tier();
+      ctx->op_t->set_alloc_hint(obs.oi.soid, obs.oi.expected_object_size,
+                                obs.oi.expected_write_size,
+                                obs.oi.alloc_hint_flags);
+      dout(1) << __func__ << " add fast tier alloc hint for " << obs.oi << dendl;
+    }
     if (obs.oi.is_on_tier())
       ctx->delta_stats.num_objects_fast++;
   } else if (obs.oi.is_whiteout()) {

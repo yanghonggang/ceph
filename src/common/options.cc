@@ -1833,6 +1833,10 @@ std::vector<Option> get_global_options() {
     .set_default(10)
     .set_description(""),
 
+    Option("osd_pool_default_cache_local_mode_fast", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+    .set_default(false)
+    .set_description("create new object on fast dev by default"),
+
     Option("osd_hit_set_min_size", Option::TYPE_INT, Option::LEVEL_ADVANCED)
     .set_default(1000)
     .set_description(""),

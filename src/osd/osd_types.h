@@ -1351,6 +1351,7 @@ public:
     cache_target_dirty_ratio_micro = 0;
     cache_target_dirty_high_ratio_micro = 0;
     cache_target_full_ratio_micro = 0;
+    cache_local_mode_default_fast = false;
     hit_set_params = HitSet::Params();
     hit_set_period = 0;
     hit_set_count = 0;
@@ -1365,7 +1366,7 @@ public:
   uint32_t cache_target_dirty_ratio_micro; ///< cache: fraction of target to leave dirty
   uint32_t cache_target_dirty_high_ratio_micro; ///<cache: fraction of  target to flush with high speed
   uint32_t cache_target_full_ratio_micro;  ///< cache: fraction of target to fill before we evict in earnest
-
+  bool cache_local_mode_default_fast; ///< cache: store new object into fast dev by default
   uint32_t cache_min_flush_age;  ///< minimum age (seconds) before we can flush
   uint32_t cache_min_evict_age;  ///< minimum age (seconds) before we can evict
 
@@ -1427,6 +1428,7 @@ public:
       cache_target_dirty_ratio_micro(0),
       cache_target_dirty_high_ratio_micro(0),
       cache_target_full_ratio_micro(0),
+      cache_local_mode_default_fast(false),
       cache_min_flush_age(0),
       cache_min_evict_age(0),
       hit_set_params(),
