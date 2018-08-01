@@ -5371,7 +5371,8 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	if (obs.exists && !oi.is_whiteout()) {
 	  ::encode(oi.size, osd_op.outdata);
 	  ::encode(oi.mtime, osd_op.outdata);
-	  dout(10) << "stat oi has " << oi.size << " " << oi.mtime << dendl;
+	  ::encode(oi.is_on_tier(), osd_op.outdata);
+	  dout(1) << "stat oi: " << oi << dendl;
 	} else {
 	  result = -ENOENT;
 	  dout(10) << "stat oi object does not exist" << dendl;

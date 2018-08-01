@@ -229,17 +229,21 @@ struct ObjectOperation {
     time_t *ptime;
     struct timespec *pts;
     int *prval;
+    bool *pon_fast;
     C_ObjectOperation_stat(uint64_t *ps, ceph::real_time *pm, time_t *pt, struct timespec *_pts,
-			   int *prval)
-      : psize(ps), pmtime(pm), ptime(pt), pts(_pts), prval(prval) {}
+			   int *prval, bool *pon_fast=NULL)
+      : psize(ps), pmtime(pm), ptime(pt), pts(_pts), prval(prval),
+        pon_fast(pon_fast) {}
     void finish(int r) override {
       if (r >= 0) {
 	bufferlist::iterator p = bl.begin();
 	try {
 	  uint64_t size;
 	  ceph::real_time mtime;
+          bool on_fast = false;
 	  ::decode(size, p);
 	  ::decode(mtime, p);
+          ::decode(on_fast, p);
 	  if (psize)
 	    *psize = size;
 	  if (pmtime)
@@ -248,6 +252,8 @@ struct ObjectOperation {
 	    *ptime = ceph::real_clock::to_time_t(mtime);
 	  if (pts)
 	    *pts = ceph::real_clock::to_timespec(mtime);
+          if (pon_fast)
+            *pon_fast = on_fast;
 	} catch (buffer::error& e) {
 	  if (prval)
 	    *prval = -EIO;
@@ -260,6 +266,16 @@ struct ObjectOperation {
     unsigned p = ops.size() - 1;
     C_ObjectOperation_stat *h = new C_ObjectOperation_stat(psize, pmtime, NULL, NULL,
 							   prval);
+    out_bl[p] = &h->bl;
+    out_handler[p] = h;
+    out_rval[p] = prval;
+  }
+  void stat(uint64_t *psize, ceph::real_time *pmtime, int *prval,
+            bool *pon_fast) {
+    add_op(CEPH_OSD_OP_STAT);
+    unsigned p = ops.size() - 1;
+    C_ObjectOperation_stat *h = new C_ObjectOperation_stat(psize, pmtime, NULL, NULL,
+							   prval, pon_fast);
     out_bl[p] = &h->bl;
     out_handler[p] = h;
     out_rval[p] = prval;

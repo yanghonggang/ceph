@@ -1288,6 +1288,13 @@ int librados::IoCtx::stat2(const std::string& oid, uint64_t *psize, struct times
   return io_ctx_impl->stat2(obj, psize, pts);
 }
 
+int librados::IoCtx::stat3(const std::string& oid, uint64_t *psize,
+                           time_t *pmtime, bool *pon_fast)
+{
+  object_t obj(oid);
+  return io_ctx_impl->stat3(obj, psize, pmtime, pon_fast);
+}
+
 int librados::IoCtx::exec(const std::string& oid, const char *cls, const char *method,
 			  bufferlist& inbl, bufferlist& outbl)
 {

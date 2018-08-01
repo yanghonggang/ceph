@@ -2336,10 +2336,11 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
     string oid(nargs[1]);
     uint64_t size;
     time_t mtime;
+    bool on_fast = false;
     if (use_striper) {
       ret = striper.stat(oid, &size, &mtime);
     } else {
-      ret = io_ctx.stat(oid, &size, &mtime);
+      ret = io_ctx.stat3(oid, &size, &mtime, &on_fast);
     }
     if (ret < 0) {
       cerr << " error stat-ing " << pool_name << "/" << oid << ": "
@@ -2348,7 +2349,9 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
     } else {
       utime_t t(mtime, 0);
       cout << pool_name << "/" << oid
-           << " mtime " << t << ", size " << size << std::endl;
+           << " mtime " << t << ", size " << size
+           << " on_fast " << on_fast
+           << std::endl;
     }
   }
   else if (strcmp(nargs[0], "get") == 0) {

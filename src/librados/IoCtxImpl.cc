@@ -1592,6 +1592,28 @@ int librados::IoCtxImpl::stat2(const object_t& oid, uint64_t *psize, struct time
   return 0;
 }
 
+int librados::IoCtxImpl::stat3(const object_t& oid, uint64_t *psize,
+                               time_t *pmtime, bool *pon_fast)
+{
+  uint64_t size;
+  real_time mtime;
+
+  if (!psize)
+    psize = &size;
+
+  ::ObjectOperation rd;
+  prepare_assert_ops(&rd);
+  rd.stat(psize, &mtime, NULL, pon_fast);
+  int r = operate_read(oid, &rd, NULL);
+
+  if (r >= 0 && pmtime) {
+    *pmtime = ceph::real_clock::to_time_t(mtime);
+  }
+
+  return r;
+}
+
+
 int librados::IoCtxImpl::getxattr(const object_t& oid,
 				    const char *name, bufferlist& bl)
 {

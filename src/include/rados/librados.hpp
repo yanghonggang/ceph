@@ -775,6 +775,9 @@ namespace librados
     int rmxattr(const std::string& oid, const char *name);
     int stat(const std::string& oid, uint64_t *psize, time_t *pmtime);
     int stat2(const std::string& oid, uint64_t *psize, struct timespec *pts);
+    int stat3(const std::string& oid, uint64_t *psize, time_t *pmtime,
+              bool *pon_fast);
+
     int exec(const std::string& oid, const char *cls, const char *method,
 	     bufferlist& inbl, bufferlist& outbl);
     /**

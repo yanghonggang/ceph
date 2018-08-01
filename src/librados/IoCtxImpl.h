@@ -139,6 +139,8 @@ struct librados::IoCtxImpl {
   int remove(const object_t& oid, int flags);
   int stat(const object_t& oid, uint64_t *psize, time_t *pmtime);
   int stat2(const object_t& oid, uint64_t *psize, struct timespec *pts);
+  int stat3(const object_t& oid, uint64_t *psize, time_t *pmtime,
+            bool*on_fast);
   int trunc(const object_t& oid, uint64_t size);
   int cmpext(const object_t& oid, uint64_t off, bufferlist& cmp_bl);
 
