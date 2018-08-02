@@ -1170,7 +1170,7 @@ protected:
   /**
    * Trigger a synchronous migration if needed. 
    */
-  bool maybe_migrate(ObjectContextRef obc,
+  bool maybe_promote(ObjectContextRef obc,
                      bool in_hit_set,
                      uint32_t recency);
 

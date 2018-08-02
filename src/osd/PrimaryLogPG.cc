@@ -2214,7 +2214,7 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
     uint32_t recency = op->may_write() ? 
                          pool.info.min_write_recency_for_promote :
                          pool.info.min_read_recency_for_promote; 
-    maybe_migrate(obc, in_hit_set, recency);
+    maybe_promote(obc, in_hit_set, recency);
   }
 
   if (maybe_handle_cache(op,
@@ -2684,7 +2684,7 @@ PrimaryLogPG::cache_result_t PrimaryLogPG::maybe_handle_cache_detail(
   return cache_result_t::NOOP;
 }
 
-bool PrimaryLogPG::maybe_migrate(ObjectContextRef obc,
+bool PrimaryLogPG::maybe_promote(ObjectContextRef obc,
                                  bool in_hit_set,
                                  uint32_t recency)
 {
@@ -13237,24 +13237,17 @@ bool PrimaryLogPG::agent_work(int start_max, int agent_flush_quota)
       continue;
     }
 
-    if (agent_state->evict_mode != TierAgentState::EVICT_MODE_IDLE &&
-	agent_maybe_evict(obc, false))
+    if (agent_state->evict_mode != TierAgentState::EVICT_MODE_IDLE) {
+      if (pool.info.cache_mode != pg_pool_t::CACHEMODE_LOCAL)
+        agent_maybe_evict(obc, false);
+      else if (obc->obs.oi.is_on_tier())
+        agent_maybe_migrate(obc, false);
+
       ++started;
-    else if (agent_state->flush_mode != TierAgentState::FLUSH_MODE_IDLE &&
-             agent_flush_quota > 0) {
-      bool processed = false;
-      if (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL) {
-          // only object in fast tier need flush
-          if (obc->obs.oi.is_on_tier()) {
-            processed = agent_maybe_migrate(obc, false);
-          }
-      } else {
-         processed = agent_maybe_flush(obc);
-      }
-      if (processed) {
-        ++started;
-        --agent_flush_quota;
-      }
+    } else if (agent_state->flush_mode != TierAgentState::FLUSH_MODE_IDLE &&
+             agent_flush_quota > 0 && agent_maybe_flush(obc)) {
+      ++started;
+      --agent_flush_quota;
     }
     if (started >= start_max) {
       // If finishing early, set "next" to the next object
@@ -13366,10 +13359,6 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
           << dendl;
   const hobject_t& soid = obc->obs.oi.soid;
 
-  if (!obc->obs.oi.watchers.empty()) { // FIXME
-    dout(1) << __func__ << " skip (watchers) " << obc->obs.oi << dendl;
-    return false;
-  }
   if (obc->is_blocked()) {
     dout(1) << __func__ << " skip (blocked) " << obc->obs.oi << dendl;
     return false;
@@ -13379,24 +13368,13 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
     return false;
   }
 
-  if (soid.snap == CEPH_NOSNAP) { // FIXME
-    int result = _verify_no_head_clones(soid, obc->ssc->snapset);
-    if (result < 0) {
-      dout(1) << __func__ << " skip (clones) " << obc->obs.oi << dendl;
-      return false;
-    }
-  }
-
   if (osd->agent_is_active_oid(obc->obs.oi.soid)) {
     dout(1) << __func__ << " skip (flushing) " << obc->obs.oi << dendl;
     osd->logger->inc(l_osd_agent_skip);
     return false;
   }
 
-  // TODO: add counter
-
   // is this object cold enough?
-  // TODO: evict effort => migrate effort
   if (!promote) { // flush
     // too young?
     utime_t now = ceph_clock_now();
@@ -13406,17 +13384,17 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
     } else {
       ob_local_mtime = obc->obs.oi.mtime;
     }
-    bool flush_mode_high =
-      (agent_state->flush_mode == TierAgentState::FLUSH_MODE_HIGH);
-    if (!flush_mode_high &&
+    bool evict_mode_full =
+      (agent_state->evict_mode == TierAgentState::EVICT_MODE_FULL);
+    if (!evict_mode_full &&
         (ob_local_mtime + utime_t(pool.info.cache_min_flush_age, 0) > now)) {
       dout(1) << __func__ << " skip (too young) " << obc->obs.oi << dendl;
       osd->logger->inc(l_osd_agent_skip);
       return false;
     }
 
-    // flush all objects in flush mode high
-    if (!flush_mode_high) {
+    // demote all objects in evict mode full
+    if (!evict_mode_full) {
       int temp = 0;
       uint64_t temp_upper = 0, temp_lower = 0;
       if (hit_set)
@@ -13460,18 +13438,16 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
 
   finish_ctx(ctx.get(), pg_log_entry_t::MODIFY);
   ctx->register_on_success(
-    [this, soid]() {
-    osd->agent_finish_op(soid);
+    [this, soid, oi, promote]() {
+      osd->agent_finish_op(soid);
+      if (promote) {
+        osd->promote_finish(oi.size);
+        osd->logger->inc(l_osd_tier_promote);
+      } else {
+        osd->logger->inc(l_osd_tier_evict);
+      }
     });
   PGTransaction *t = ctx->op_t.get();
-  // as we depend on set_alloc_hint to trigger the migration
-  // we can treat this op as 'MODIFY'
-  // ANOTHER way is put one set alloc hit op in sharedwq just like scrub???
-  ////ctx->log.push_back(pg_log_entry_t(pg_log_entry_t::MODIFY, obc->obs.oi.soid,
-  ////                                  ctx->at_version,
-  ////                                  oi.version,
-  ////                                  0,
-  ////                                  osd_reqid_t(), ctx->mtime, 0));
   if (promote) {
     ctx->delta_stats.num_bytes_fast += oi.size;
     ctx->delta_stats.num_objects_fast++;
@@ -13691,43 +13667,6 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
 {
   bool requeued = false;
   bool local_mode = (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL);
-#if 0
-  // FIXME: miration choose mode
-  if (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL) {
-    // Let delay play out
-    if (agent_state->delaying) {
-      dout(1) << __func__ << this << " delaying, ignored" << dendl;
-      return requeued;
-    }
-    // TODO: stats can't be trusted until we scrub
-    bool old_idle = agent_state->is_idle(); 
-    agent_state->flush_mode = TierAgentState::FLUSH_MODE_LOW;
-
-    dout(1) << __func__ << " " << this << " cache mode local, flush mode slow"
-            << dendl;
-    
-    // TODO: support flush effort caclation
-
-    uint64_t old_effort = agent_state->evict_effort;
-    agent_state->evict_effort = 1000000 / 2 + rand(); // fixed effort
-    // NOTE: we are using evict_effort as a proxy for *all* agent effort
-    // (including flush).  This is probably fine (they should be
-    // correlated) but it is not precisely correct.
-    if (agent_state->is_idle()) {
-      if (!restart && !old_idle) {
-        osd->agent_disable_pg(this, old_effort);
-      }
-    } else {
-      if (restart || old_idle) {
-        osd->agent_enable_pg(this, agent_state->evict_effort);
-      } else if (old_effort != agent_state->evict_effort) {
-        osd->agent_adjust_pg(this, old_effort, agent_state->evict_effort);
-      }
-    }
-
-    return requeued;
-  }
-#endif
   // Let delay play out
   if (agent_state->delaying) {
     dout(1) << __func__ << this << " delaying, ignored" << dendl;
@@ -13761,7 +13700,7 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
     unflushable += info.stats.stats.sum.num_objects_omap;
 
   uint64_t num_user_objects = local_mode ? info.stats.stats.sum.num_objects_fast :
-    info.stats.stats.sum.num_objects;
+                                info.stats.stats.sum.num_objects;
   if (num_user_objects > unflushable)
     num_user_objects -= unflushable;
   else
@@ -13806,7 +13745,6 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
   // get dirty, full ratios
   uint64_t dirty_micro = 0;
   uint64_t full_micro = 0;
-  uint64_t target_micro = 0;
   if (pool.info.target_max_bytes && num_user_objects > 0) {
     uint64_t avg_size = num_user_bytes / num_user_objects;
     dirty_micro =
@@ -13833,26 +13771,23 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
 	   << dendl;
 
   // flush mode
-  uint64_t flush_target = pool.info.cache_target_dirty_ratio_micro;
-  uint64_t flush_high_target = pool.info.cache_target_dirty_high_ratio_micro;
-  uint64_t flush_slop = (float)flush_target * cct->_conf->osd_agent_slop;
-  if (restart || agent_state->flush_mode == TierAgentState::FLUSH_MODE_IDLE) {
-    flush_target += flush_slop;
-    flush_high_target += flush_slop;
-  } else {
-    flush_target -= MIN(flush_target, flush_slop);
-    flush_high_target -= MIN(flush_high_target, flush_slop);
-  }
+  if (!local_mode) {
+    uint64_t flush_target = pool.info.cache_target_dirty_ratio_micro;
+    uint64_t flush_high_target = pool.info.cache_target_dirty_high_ratio_micro;
+    uint64_t flush_slop = (float)flush_target * cct->_conf->osd_agent_slop;
+    if (restart || agent_state->flush_mode == TierAgentState::FLUSH_MODE_IDLE) {
+      flush_target += flush_slop;
+      flush_high_target += flush_slop;
+    } else {
+      flush_target -= MIN(flush_target, flush_slop);
+      flush_high_target -= MIN(flush_high_target, flush_slop);
+    }
 
-  if (local_mode) {
-    target_micro = full_micro;
-  } else {
-    target_micro = dirty_micro;
-  } 
-  if (target_micro > flush_high_target) {
-    flush_mode = TierAgentState::FLUSH_MODE_HIGH;
-  } else if (target_micro > flush_target) {
-    flush_mode = TierAgentState::FLUSH_MODE_LOW;
+    if (dirty_micro > flush_high_target) {
+      flush_mode = TierAgentState::FLUSH_MODE_HIGH;
+    } else if (dirty_micro > flush_target) {
+      flush_mode = TierAgentState::FLUSH_MODE_LOW;
+    }
   }
 
   // evict mode
@@ -13897,7 +13832,8 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
 
   skip_calc:
   bool old_idle = agent_state->is_idle();
-  if (flush_mode != agent_state->flush_mode) {
+  // don't need to update flush_mode when pool cache mode is local 
+  if (!local_mode && (flush_mode != agent_state->flush_mode)) {
     dout(1) << __func__ << " flush_mode "
 	    << TierAgentState::get_flush_mode_name(agent_state->flush_mode)
 	    << " -> "
@@ -13917,9 +13853,9 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
     }
     agent_state->flush_mode = flush_mode;
   }
-  // we don't need evict_mode when cache mode is local
-  if (!local_mode && (evict_mode != agent_state->evict_mode)) {
-    dout(5) << __func__ << " evict_mode "
+
+  if (evict_mode != agent_state->evict_mode) {
+    dout(1) << __func__ << " evict_mode "
 	    << TierAgentState::get_evict_mode_name(agent_state->evict_mode)
 	    << " -> "
 	    << TierAgentState::get_evict_mode_name(evict_mode)
