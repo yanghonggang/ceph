@@ -4560,7 +4560,9 @@ void PrimaryLogPG::maybe_create_new_object(
     obs.oi.new_object();
     if (!ignore_transaction)
       ctx->op_t->create(obs.oi.soid);
-    if (pool.info.cache_local_mode_default_fast) {
+    if ((agent_state && agent_state->evict_mode !=
+         TierAgentState::EVICT_MODE_FULL) &&
+        pool.info.cache_local_mode_default_fast) {
       // force create on fast device
       obs.oi.set_on_tier();
       ctx->op_t->set_alloc_hint(obs.oi.soid, obs.oi.expected_object_size,
@@ -13359,6 +13361,18 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
           << dendl;
   const hobject_t& soid = obc->obs.oi.soid;
 
+  // already on the right dev?
+  bool fast = (obc->obs.oi.alloc_hint_flags &
+               CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER);
+  if (promote == fast)
+    return true;
+
+  if (promote && agent_state && agent_state->evict_mode ==
+      TierAgentState::EVICT_MODE_FULL) {
+    dout(1) << __func__ << " skip (cache dev full) " << obc->obs.oi << dendl;
+    return false;
+  }
+
   if (obc->is_blocked()) {
     dout(1) << __func__ << " skip (blocked) " << obc->obs.oi << dendl;
     return false;
@@ -13410,12 +13424,6 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
         return false;
     }
   }
-
-  // already in the right dev?
-  bool fast = (obc->obs.oi.alloc_hint_flags &
-               CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER);
-  if (promote == fast)
-    return true;
 
   // kick off async migration
   OpContextUPtr ctx = simple_opc_create(obc);
