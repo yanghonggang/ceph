@@ -4570,6 +4570,10 @@ void PrimaryLogPG::maybe_create_new_object(
                                 obs.oi.alloc_hint_flags);
       dout(1) << __func__ << " add fast tier alloc hint for " << obs.oi << dendl;
     }
+    if (agent_state)
+      dout(1) << __func__ << " " << agent_state->get_evict_mode_name()
+              << " " << obs.oi
+              << dendl;
     if (obs.oi.is_on_tier())
       ctx->delta_stats.num_objects_fast++;
   } else if (obs.oi.is_whiteout()) {
@@ -13387,6 +13391,9 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
     osd->logger->inc(l_osd_agent_skip);
     return false;
   }
+    
+  bool evict_mode_full =
+        (agent_state->evict_mode == TierAgentState::EVICT_MODE_FULL);
 
   // is this object cold enough?
   if (!promote) { // flush
@@ -13398,8 +13405,6 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
     } else {
       ob_local_mtime = obc->obs.oi.mtime;
     }
-    bool evict_mode_full =
-      (agent_state->evict_mode == TierAgentState::EVICT_MODE_FULL);
     if (!evict_mode_full &&
         (ob_local_mtime + utime_t(pool.info.cache_min_flush_age, 0) > now)) {
       dout(1) << __func__ << " skip (too young) " << obc->obs.oi << dendl;
@@ -13423,6 +13428,13 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
       if (1000000 - temp_upper >= agent_state->evict_effort)
         return false;
     }
+  } else {
+    if (evict_mode_full) {
+      dout(1) << __func__
+              << " skip(evict_mode_full) " << obc->obs.oi
+              << dendl;
+      return false;
+    } 
   }
 
   // kick off async migration
