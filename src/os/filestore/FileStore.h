@@ -503,7 +503,8 @@ public:
 
   void collect_metadata(map<string,string> *pm) override;
 
-  int statfs(struct store_statfs_t *buf) override;
+  int statfs(struct store_statfs_t *buf,
+             struct store_statfs_t *fast_buf=NULL) override;
 
   int _do_transactions(
     vector<Transaction> &tls, uint64_t op_seq,

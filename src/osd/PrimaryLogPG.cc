@@ -13773,6 +13773,18 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
     full_micro =
       num_user_objects * avg_size * 1000000 /
       MAX(pool.info.target_max_bytes / divisor, 1);
+    if (local_mode) {
+      float dev_full_ratio = osd->get_fast_full_ratio();
+      // let's leave 0.1 safe margin
+      uint64_t dev_full_micro = MIN(1000000, 
+                                    uint64_t(dev_full_ratio * 1000000 * 1.1));
+ 
+      dout(1) << __func__
+              << " dev_full_micro = " << dev_full_micro
+              << ", full_micro = " << full_micro
+              << dendl;
+      full_micro = MAX(dev_full_micro, full_micro);
+    }
   }
   if (pool.info.target_max_objects > 0) {
     uint64_t dirty_objects_micro =

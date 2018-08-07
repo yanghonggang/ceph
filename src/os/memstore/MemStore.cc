@@ -221,7 +221,8 @@ int MemStore::mkfs()
   return 0;
 }
 
-int MemStore::statfs(struct store_statfs_t *st)
+int MemStore::statfs(struct store_statfs_t *st,
+                     struct store_statfs_t *fast_st)
 {
    dout(10) << __func__ << dendl;
   st->reset();

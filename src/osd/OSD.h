@@ -1103,10 +1103,11 @@ private:
       return INVALID;
   }
   double cur_ratio;  ///< current utilization
+  double cur_fast_ratio;  ///< current fast dev utilization
   mutable int64_t injectfull = 0;
   s_names injectfull_state = NONE;
   float get_failsafe_full_ratio();
-  void check_full_status(float ratio);
+  void check_full_status(float ratio, float fast_ratio=0);
   bool _check_full(s_names type, ostream &ss) const;
 public:
   bool check_failsafe_full(ostream &ss) const;
@@ -1120,7 +1121,10 @@ public:
   bool need_fullness_update();  ///< osdmap state needs update
   void set_injectfull(s_names type, int64_t count);
   bool check_osdmap_full(const set<pg_shard_t> &missing_on);
-
+  float get_fast_full_ratio() {
+    Mutex::Locker l(full_status_lock);
+    return cur_fast_ratio;
+  }
 
   // -- epochs --
 private:

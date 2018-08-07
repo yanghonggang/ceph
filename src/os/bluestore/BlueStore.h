@@ -2223,7 +2223,8 @@ public:
   }
 
 public:
-  int statfs(struct store_statfs_t *buf) override;
+  int statfs(struct store_statfs_t *buf,
+             struct store_statfs_t *fast_buf=NULL) override;
 
   void collect_metadata(map<string,string> *pm) override;
 

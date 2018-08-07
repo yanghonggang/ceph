@@ -273,6 +273,7 @@ OSDService::OSDService(OSD *osd) :
   full_status_lock("OSDService::full_status_lock"),
   cur_state(NONE),
   cur_ratio(0),
+  cur_fast_ratio(0),
   epoch_lock("OSDService::epoch_lock"),
   boot_epoch(0), up_epoch(0), bind_epoch(0),
   is_stopping_lock("OSDService::is_stopping_lock")
@@ -759,11 +760,12 @@ float OSDService::get_failsafe_full_ratio()
   return full_ratio;
 }
 
-void OSDService::check_full_status(float ratio)
+void OSDService::check_full_status(float ratio, float fast_ratio)
 {
   Mutex::Locker l(full_status_lock);
 
   cur_ratio = ratio;
+  cur_fast_ratio = fast_ratio;
 
   // The OSDMap ratios take precendence.  So if the failsafe is .95 and
   // the admin sets the cluster full to .96, the failsafe moves up to .96
@@ -955,18 +957,23 @@ osd_stat_t OSDService::set_osd_stat(const struct store_statfs_t &stbuf,
 void OSDService::update_osd_stat(vector<int>& hb_peers)
 {
   // load osd stats first
-  struct store_statfs_t stbuf;
-  int r = osd->store->statfs(&stbuf);
+  struct store_statfs_t stbuf, stbuf_fast;
+  int r = osd->store->statfs(&stbuf, &stbuf_fast);
   if (r < 0) {
     derr << "statfs() failed: " << cpp_strerror(r) << dendl;
     return;
   }
 
+  dout(1) << __func__ << " fast: total " << stbuf_fast.total
+          << ", available " << stbuf_fast.available
+          << dendl;
   auto new_stat = set_osd_stat(stbuf, hb_peers, osd->get_num_pgs());
   dout(20) << "update_osd_stat " << new_stat << dendl;
   assert(new_stat.kb);
   float ratio = ((float)new_stat.kb_used) / ((float)new_stat.kb);
-  check_full_status(ratio);
+  float fast_ratio =((float)(stbuf_fast.total - stbuf_fast.available)/
+                     (float)(stbuf_fast.total + 1));
+  check_full_status(ratio, fast_ratio);
 }
 
 bool OSDService::check_osdmap_full(const set<pg_shard_t> &missing_on)

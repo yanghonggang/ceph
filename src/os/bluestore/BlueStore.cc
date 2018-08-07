@@ -6477,11 +6477,27 @@ void BlueStore::collect_metadata(map<string,string> *pm)
   }
 }
 
-int BlueStore::statfs(struct store_statfs_t *buf)
+int BlueStore::statfs(struct store_statfs_t *buf,
+                      struct store_statfs_t *fast_buf)
 {
   buf->reset();
   buf->total = bdev->get_size();
   buf->available = alloc->get_free();
+
+  if (fast_buf && bdev_fast) {
+    fast_buf->reset();
+    fast_buf->total = bdev_fast->get_size();
+    fast_buf->available = alloc_fast->get_free();
+    float full_ratio = ((float)(fast_buf->available) / (float)(fast_buf->total
+                        + 1));
+    dout(1) << __func__ << " fast available/total "
+            <<  fast_buf->available << "/"
+            << fast_buf->total
+            << "=" << full_ratio
+            << dendl;
+  } else { // DELETE ME
+    dout(1) << __func__ << " fast_buf is null" << dendl;
+  }
 
   if (bluefs) {
     // part of our shared device is "free" according to BlueFS, but we

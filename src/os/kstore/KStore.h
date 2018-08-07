@@ -441,7 +441,8 @@ public:
     f->close_section();
   }
 
-  int statfs(struct store_statfs_t *buf) override;
+  int statfs(struct store_statfs_t *buf,
+             struct store_statfs_t *fast_buf=NULL) override;
 
   using ObjectStore::exists;
   bool exists(const coll_t& cid, const ghobject_t& oid) override;

@@ -708,7 +708,8 @@ void FileStore::collect_metadata(map<string,string> *pm)
   }
 }
 
-int FileStore::statfs(struct store_statfs_t *buf0)
+int FileStore::statfs(struct store_statfs_t *buf0,
+                      struct store_statfs_t *buf1)
 {
   struct statfs buf;
   buf0->reset();
