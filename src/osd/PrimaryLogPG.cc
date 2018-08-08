@@ -2210,7 +2210,7 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
     return;
   }
 
-  if (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL) {
+  if ((pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL) && obc.get()) {
     uint32_t recency = op->may_write() ? 
                          pool.info.min_write_recency_for_promote :
                          pool.info.min_read_recency_for_promote; 
@@ -13360,6 +13360,10 @@ void PrimaryLogPG::agent_load_hit_sets()
 
 bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
 {
+  // skip any migration
+  if (cct->_conf->osd_agent_skip_migrate)
+    return false;
+
   dout(1) << __func__ << " " << obc->obs.oi
           << ", promote " << promote
           << dendl;
@@ -13368,21 +13372,29 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
   // already on the right dev?
   bool fast = (obc->obs.oi.alloc_hint_flags &
                CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER);
-  if (promote == fast)
+  if (promote == fast) {
+    dout(1) << __func__
+            << " skip (already on the right dev) " << obc->obs.oi.soid
+            << dendl;
+    osd->logger->inc(l_osd_agent_skip);
     return true;
+  }
 
   if (promote && agent_state && agent_state->evict_mode ==
       TierAgentState::EVICT_MODE_FULL) {
     dout(1) << __func__ << " skip (cache dev full) " << obc->obs.oi << dendl;
+    osd->logger->inc(l_osd_agent_skip);
     return false;
   }
 
   if (obc->is_blocked()) {
     dout(1) << __func__ << " skip (blocked) " << obc->obs.oi << dendl;
+    osd->logger->inc(l_osd_agent_skip);
     return false;
   }
   if (obc->obs.oi.is_cache_pinned()) {
     dout(1) << __func__ << " skip (cache_pinned) " << obc->obs.oi << dendl;
+    osd->logger->inc(l_osd_agent_skip);
     return false;
   }
 
@@ -13406,7 +13418,7 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
       ob_local_mtime = obc->obs.oi.mtime;
     }
     if (!evict_mode_full &&
-        (ob_local_mtime + utime_t(pool.info.cache_min_flush_age, 0) > now)) {
+        (ob_local_mtime + utime_t(pool.info.cache_min_evict_age, 0) > now)) {
       dout(1) << __func__ << " skip (too young) " << obc->obs.oi << dendl;
       osd->logger->inc(l_osd_agent_skip);
       return false;

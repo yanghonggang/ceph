@@ -1669,6 +1669,10 @@ std::vector<Option> get_global_options() {
     .set_default(.02)
     .set_description(""),
 
+    Option("osd_agent_skip_migrate", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+    .set_default(false)
+    .set_description(""),
+
     Option("osd_uuid", Option::TYPE_UUID, Option::LEVEL_ADVANCED)
     .set_default(uuid_d())
     .set_description(""),

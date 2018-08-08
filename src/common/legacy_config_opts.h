@@ -581,6 +581,9 @@ OPTION(osd_agent_hist_halflife, OPT_INT)
 // this amount below the threshold to disable.
 OPTION(osd_agent_slop, OPT_FLOAT)
 
+// skip agent migration for debug only
+OPTION(osd_agent_skip_migrate, OPT_BOOL)
+
 OPTION(osd_uuid, OPT_UUID)
 OPTION(osd_data, OPT_STR)
 OPTION(osd_journal, OPT_STR)
