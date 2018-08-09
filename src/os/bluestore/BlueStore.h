@@ -1636,6 +1636,7 @@ public:
     deferred_queue_t txcs;           ///< txcs in this batch
     IOContext ioc;                   ///< our aios for slow dev
     IOContext ioc_fast;                   ///< our aios for fast dev
+    std::atomic_int num_iocs = {0}; ///< num iocs to wait
     /// bytes of pending io for each deferred seq (may be 0)
     map<uint64_t,int> seq_bytes;
 

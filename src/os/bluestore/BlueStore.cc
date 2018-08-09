@@ -9238,6 +9238,8 @@ void BlueStore::_deferred_submit_unlock(OpSequencer *osr)
   uint64_t start = 0, pos = 0;
   bufferlist bl;
   bool fast = false;
+  bool has_fast = false;
+  bool has_slow = false;
   auto i = b->iomap.begin();
   while (true) {
     if (i == b->iomap.end() || i->first != pos || i->second.fast != fast) {
@@ -9251,10 +9253,19 @@ void BlueStore::_deferred_submit_unlock(OpSequencer *osr)
 	  logger->inc(l_bluestore_deferred_write_ops);
 	  logger->inc(l_bluestore_deferred_write_bytes, bl.length());
 	  int r = -1;
-          if (fast)
+          if (fast) {
+            if (!has_fast) {
+              b->num_iocs ++;
+              has_fast = true;
+            }
 	    r = bdev_fast->aio_write(start, bl, &b->ioc_fast, false);
-	  else
+          } else {
+            if (!has_slow) {
+              b->num_iocs ++;
+              has_slow = true;
+            }
 	    r = bdev->aio_write(start, bl, &b->ioc, false);
+          }
 	  assert(r == 0);
 	}
       }
@@ -9279,8 +9290,13 @@ void BlueStore::_deferred_submit_unlock(OpSequencer *osr)
   }
 
   deferred_lock.unlock();
-  bdev->aio_submit(&b->ioc);
-  bdev_fast->aio_submit(&b->ioc_fast);
+  if (has_slow) {
+    bdev->aio_submit(&b->ioc);
+  }
+  if (has_fast) {
+    bdev_fast->aio_submit(&b->ioc_fast);
+  }
+  assert(has_slow || has_fast);
 }
 
 struct C_DeferredTrySubmit : public Context {
@@ -9300,6 +9316,15 @@ void BlueStore::_deferred_aio_finish(OpSequencer *osr)
   {
     std::lock_guard<std::mutex> l(deferred_lock);
     assert(osr->deferred_running == b);
+    b->num_iocs --;
+    if (b->num_iocs.load()) {
+    //if (b->ioc.has_running_aios() || b->ioc_fast.has_running_aios()) {
+      dout(1) << __func__ << " ioc num_running " << b->ioc.num_running
+              << ", ioc fast num_running " << b->ioc_fast.num_running
+              << ": wait for all finished"
+              << dendl;
+      return;
+    }
     osr->deferred_running = nullptr;
     if (!osr->deferred_pending) {
       dout(20) << __func__ << " dequeueing" << dendl;

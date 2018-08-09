@@ -62,6 +62,10 @@ public:
     return num_pending.load();
   }
 
+  bool has_running_aios() {
+    return num_running.load();
+  }
+
   void aio_wait();
 
   void try_aio_wake() {
