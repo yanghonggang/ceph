@@ -3353,6 +3353,12 @@ std::vector<Option> get_global_options() {
     .set_description("Default checksum algorithm to use")
     .set_long_description("crc32c, xxhash32, and xxhash64 are available.  The _16 and _8 variants use only a subset of the bits for more compact (but less reliable) checksumming."),
 
+    Option("bluestore_retry_disk_reads", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
+    .set_default(3)
+    .set_min_max(0, 255)
+    .set_description("Number of read retries on checksum validation error")
+    .set_long_description("Retries to read data from the disk this many times when checksum validation fails to handle spurious read errors gracefully."),
+
     Option("bluestore_csum_min_block", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
     .set_default(4096)
     .set_safe()

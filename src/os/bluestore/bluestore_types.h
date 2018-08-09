@@ -646,7 +646,9 @@ public:
     }
     if (plen)
       *plen = p->length - x_off;
-    return p->offset + x_off;
+
+    assert((p->offset + x_off) >= x_off);
+    return p->get_offset() + x_off;
   }
 
   // validate whether or not the status of pextents within the given range
@@ -992,6 +994,10 @@ struct bluestore_onode_t {
 
   bool has_hint_flag_inlined() const {
     return alloc_hint_flags & CEPH_OSD_ALLOC_HINT_FLAG_INLINE;
+  }
+
+  bool has_hint_flag_fast() const {
+    return alloc_hint_flags & CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER;
   }
 
   bool has_omap() const {

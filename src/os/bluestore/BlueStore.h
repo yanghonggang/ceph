@@ -1630,10 +1630,12 @@ public:
     struct deferred_io {
       bufferlist bl;    ///< data
       uint64_t seq;     ///< deferred transaction seq
+      bool fast;	///< on fast dev
     };
     map<uint64_t,deferred_io> iomap; ///< map of ios in this batch
     deferred_queue_t txcs;           ///< txcs in this batch
-    IOContext ioc;                   ///< our aios
+    IOContext ioc;                   ///< our aios for slow dev
+    IOContext ioc_fast;                   ///< our aios for fast dev
     /// bytes of pending io for each deferred seq (may be 0)
     map<uint64_t,int> seq_bytes;
 
@@ -1641,12 +1643,12 @@ public:
     void _audit(CephContext *cct);
 
     DeferredBatch(CephContext *cct, OpSequencer *osr)
-      : osr(osr), ioc(cct, this) {}
+      : osr(osr), ioc(cct, this), ioc_fast(cct, this) {}
 
     /// prepare a write
     void prepare_write(CephContext *cct,
 		       uint64_t seq, uint64_t offset, uint64_t length,
-		       bufferlist::const_iterator& p);
+		       bufferlist::const_iterator& p, bool fast = false);
 
     void aio_finish(BlueStore *store) override {
       store->_deferred_aio_finish(osr);
@@ -2263,7 +2265,8 @@ public:
     uint64_t offset,
     size_t len,
     bufferlist& bl,
-    uint32_t op_flags = 0);
+    uint32_t op_flags = 0,
+    uint8_t retry_count = 0);
 
 private:
   int _fiemap(CollectionHandle &c_, const ghobject_t& oid,

@@ -3007,11 +3007,12 @@ bool BlueStore::WriteContext::has_conflict(
 void BlueStore::DeferredBatch::prepare_write(
   CephContext *cct,
   uint64_t seq, uint64_t offset, uint64_t length,
-  bufferlist::const_iterator& blp)
+  bufferlist::const_iterator& blp, bool fast)
 {
   _discard(cct, offset, length);
   auto i = iomap.insert(make_pair(offset, deferred_io()));
   assert(i.second);  // this should be a new insertion
+  i.first->second.fast = fast;
   i.first->second.seq = seq;
   blp.copy(length, i.first->second.bl);
   i.first->second.bl.reassign_to_mempool(
@@ -3019,6 +3020,7 @@ void BlueStore::DeferredBatch::prepare_write(
   dout(20) << __func__ << " seq " << seq
 	   << " 0x" << std::hex << offset << "~" << length
 	   << " crc " << i.first->second.bl.crc32c(-1)
+           << " fast " << fast
 	   << std::dec << dendl;
   seq_bytes[seq] += length;
 #ifdef DEBUG_DEFERRED
@@ -6798,7 +6800,8 @@ int BlueStore::_do_read(
   uint64_t offset,
   size_t length,
   bufferlist& bl,
-  uint32_t op_flags)
+  uint32_t op_flags,
+  uint8_t retry_count)
 {
   FUNCTRACE();
   int r = 0;
@@ -7025,7 +7028,13 @@ int BlueStore::_do_read(
       bufferlist& compressed_bl = *p++;
       if (_verify_csum(o, &bptr->get_blob(), 0, compressed_bl,
 		       b2r_it->second.front().logical_offset) < 0) {
-	return -EIO;
+        if (retry_count >= static_cast<uint8_t>(cct->_conf->bluestore_retry_disk_reads)) {
+	  return -EIO;
+        }
+        dout(1) << __func__ << " csum error encountered, retry: retry_count "
+                << retry_count
+                << dendl;
+        return _do_read(c, o, offset, length, bl, op_flags, retry_count + 1);
       }
       bufferlist raw_bl;
       r = _decompress(compressed_bl, &raw_bl);
@@ -7043,7 +7052,13 @@ int BlueStore::_do_read(
       for (auto& reg : b2r_it->second) {
 	if (_verify_csum(o, &bptr->get_blob(), reg.r_off, reg.bl,
 			 reg.logical_offset) < 0) {
-	  return -EIO;
+          if (retry_count >= static_cast<uint8_t>(cct->_conf->bluestore_retry_disk_reads)) {
+	    return -EIO;
+          }
+          dout(1) << __func__ << " csum error encountered, retry: retry_count "
+                  << retry_count
+                  << dendl;
+          return _do_read(c, o, offset, length, bl, op_flags, retry_count + 1);
 	}
 	if (buffered) {
 	  bptr->shared_blob->bc.did_read(bptr->shared_blob->get_cache(),
@@ -7087,6 +7102,12 @@ int BlueStore::_do_read(
   assert(pos == length);
   assert(pr == pr_end);
   r = bl.length();
+
+  if (retry_count) {
+    dout(5) << __func__ << " read at 0x" << std::hex << offset << "~" << length
+            << " failed " << std::dec << retry_count << " times before succeeding" << dendl;
+  }
+
   return r;
 }
 
@@ -7098,6 +7119,10 @@ int BlueStore::_verify_csum(OnodeRef& o,
   int bad;
   uint64_t bad_csum;
   utime_t start = ceph_clock_now();
+  dout(30) << "dump obj: " << o->oid << "------------->\n";
+  bl.hexdump(*_dout);
+  *_dout << dendl;
+
   int r = blob->verify_csum(blob_xoffset, bl, &bad, &bad_csum);
   if (r < 0) {
     if (r == -1) {
@@ -7120,7 +7145,8 @@ int BlueStore::_verify_csum(OnodeRef& o,
 	   << (logical_offset + bad - blob_xoffset) << "~"
 	   << blob->get_csum_chunk_size() << std::dec
 	   << ", object " << o->oid
-	   << dendl;
+	   << ", on fast " << o->onode.has_hint_flag_fast()
+           << dendl;
     } else {
       derr << __func__ << " failed with exit code: " << cpp_strerror(r) << dendl;
     }
@@ -9158,7 +9184,7 @@ void BlueStore::_deferred_queue(TransContext *txc)
     bufferlist::const_iterator p = op.data.begin();
     for (auto e : op.extents) {
       txc->osr->deferred_pending->prepare_write(
-	cct, wt.seq, e.offset, e.length, p);
+	cct, wt.seq, e.get_offset(), e.length, p, e.is_on_fast_tier());
     }
   }
   if (deferred_aggressive &&
@@ -9211,17 +9237,24 @@ void BlueStore::_deferred_submit_unlock(OpSequencer *osr)
 
   uint64_t start = 0, pos = 0;
   bufferlist bl;
+  bool fast = false;
   auto i = b->iomap.begin();
   while (true) {
-    if (i == b->iomap.end() || i->first != pos) {
+    if (i == b->iomap.end() || i->first != pos || i->second.fast != fast) {
       if (bl.length()) {
 	dout(20) << __func__ << " write 0x" << std::hex
 		 << start << "~" << bl.length()
-		 << " crc " << bl.crc32c(-1) << std::dec << dendl;
+		 << " crc " << bl.crc32c(-1) << std::dec
+                 << " fast " << fast
+                 << dendl;
 	if (!g_conf->bluestore_debug_omit_block_device_write) {
 	  logger->inc(l_bluestore_deferred_write_ops);
 	  logger->inc(l_bluestore_deferred_write_bytes, bl.length());
-	  int r = bdev->aio_write(start, bl, &b->ioc, false);
+	  int r = -1;
+          if (fast)
+	    r = bdev_fast->aio_write(start, bl, &b->ioc_fast, false);
+	  else
+	    r = bdev->aio_write(start, bl, &b->ioc, false);
 	  assert(r == 0);
 	}
       }
@@ -9230,10 +9263,12 @@ void BlueStore::_deferred_submit_unlock(OpSequencer *osr)
       }
       start = 0;
       pos = i->first;
+      fast = i->second.fast;
       bl.clear();
     }
     dout(20) << __func__ << "   seq " << i->second.seq << " 0x"
 	     << std::hex << pos << "~" << i->second.bl.length() << std::dec
+             << " fast " << fast
 	     << dendl;
     if (!bl.length()) {
       start = pos;
@@ -9245,6 +9280,7 @@ void BlueStore::_deferred_submit_unlock(OpSequencer *osr)
 
   deferred_lock.unlock();
   bdev->aio_submit(&b->ioc);
+  bdev_fast->aio_submit(&b->ioc_fast);
 }
 
 struct C_DeferredTrySubmit : public Context {
@@ -10147,7 +10183,10 @@ void BlueStore::_do_write_small(
 	  int r = b->get_blob().map(
 	    b_off, b_len,
 	    [&](uint64_t offset, uint64_t length) {
-	      op->extents.emplace_back(bluestore_pextent_t(offset, length));
+              // set fast flag, so we can distinguish deferred io belongs to
+              // fast or slow dev
+	      op->extents.emplace_back(bluestore_pextent_t(offset, length,
+                                       o->onode.has_hint_flag_fast()));
 	      return 0;
 	    });
 	  assert(r == 0);
@@ -10588,7 +10627,8 @@ int BlueStore::_do_alloc_write(
         txc->allocated.insert(p.offset, p.length);
       }
     }
-    dblob.allocated(P2ALIGN(b_off, min_alloc_size), final_length, extents, bdev_target == bdev_fast);
+    // don't need to set fast tag, as this is not a deferred io
+    dblob.allocated(P2ALIGN(b_off, min_alloc_size), final_length, extents/*, bdev_target == bdev_fast*/);
 
     dout(20) << __func__ << " blob " << *b << dendl;
     if (dblob.has_csum()) {

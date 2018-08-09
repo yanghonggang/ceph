@@ -585,13 +585,17 @@ void bluestore_pextent_t::dump(Formatter *f) const
 {
   f->dump_unsigned("offset", offset);
   f->dump_unsigned("length", length);
+  f->dump_bool("on_fast_tier", is_on_fast_tier());
 }
 
 ostream& operator<<(ostream& out, const bluestore_pextent_t& o) {
+  bool fast = o.is_on_fast_tier();
   if (o.is_valid())
-    return out << "0x" << std::hex << o.offset << "~" << o.length << std::dec;
+    return out << "0x" << std::hex << o.offset << "~" << o.length << std::dec
+               << " fast " << fast;
   else
-    return out << "!~" << std::hex << o.length << std::dec;
+    return out << "!~" << std::hex << o.length << std::dec
+               << " fast " << fast;
 }
 
 void bluestore_pextent_t::generate_test_instances(list<bluestore_pextent_t*>& ls)
