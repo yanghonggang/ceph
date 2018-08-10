@@ -6490,12 +6490,12 @@ int BlueStore::statfs(struct store_statfs_t *buf,
     fast_buf->reset();
     fast_buf->total = bdev_fast->get_size();
     fast_buf->available = alloc_fast->get_free();
-    float full_ratio = ((float)(fast_buf->available) / (float)(fast_buf->total
+    float free_ratio = ((float)(fast_buf->available) / (float)(fast_buf->total
                         + 1));
     dout(1) << __func__ << " fast available/total "
             <<  fast_buf->available << "/"
             << fast_buf->total
-            << "=" << full_ratio
+            << "=" << free_ratio
             << dendl;
   } else { // DELETE ME
     dout(1) << __func__ << " fast_buf is null" << dendl;
@@ -10566,7 +10566,10 @@ int BlueStore::_do_alloc_write(
     int r = alloc_target->reserve(need);
     if (r < 0) {
       derr << __func__ << " failed to reserve 0x" << std::hex << need << std::dec
+           << ", rval " << r
+           << ", alloc_target is alloc: " << (alloc_target == alloc) 
 	   << dendl;
+      assert(0);
       txc->rval = r;
       r = 0;
       return r;
