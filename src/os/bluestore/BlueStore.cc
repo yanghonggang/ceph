@@ -10554,7 +10554,12 @@ int BlueStore::_do_alloc_write(
     // as the space size is roundup to min_alloc_size, we should return
     // the unneeded space to allocator
     // FIXME: why not only reserve @need?
-    int64_t unreserve  = wctx->preallocated - need;
+    int64_t unreserve = wctx->preallocated - need;
+    dout(1) << __func__ << " wctx " << wctx
+            << ", unreserve " << unreserve
+            << ", need " << need
+            << ", min_alloc_size " << min_alloc_size
+            << dendl;
     assert(unreserve >= 0);
     alloc_target->unreserve(unreserve);
   } else {
@@ -11008,6 +11013,12 @@ int BlueStore::_do_write(
   o->extent_map.fault_range(db, offset, length);
   if (txc->preallocated > 0) {
     wctx.preallocated = txc->preallocated;
+    // clear preallocated, or it will mislead the next write operation
+    txc->preallocated = 0;
+    dout(1) << __func__ << " &wctx " << &wctx
+            << " txc " << txc
+            << " preallocated " << wctx.preallocated
+            << dendl;
   }
   _do_write_data(txc, c, o, offset, length, bl, &wctx);
   r = _do_alloc_write(txc, c, o, &wctx);
@@ -11657,7 +11668,7 @@ int BlueStore::_move_data_between_tiers(
 		     uint32_t flags)
 {
   int r = 0;
-  bool fast2slow = true;
+  bool promote = (flags & CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER);
 
   uint64_t size = o->onode.size;
   if (size == 0) {
@@ -11670,17 +11681,20 @@ int BlueStore::_move_data_between_tiers(
   if (r < 0)
     goto out;
 
+  // FIXME: min_alloc_size ssd/hdd
   txc->preallocated = P2ROUNDUP((uint64_t)bl.length(), min_alloc_size);
 
-  if (flags & CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER) {
+  if (promote) {
     r = alloc_fast->reserve(txc->preallocated);
-    fast2slow = false;
   } else {
     r = alloc->reserve(txc->preallocated);
   }
-  // FIXME: change level from 5 to 15
-  dout(5) << __func__ << " fast2slow: " << std::boolalpha << fast2slow
-          << std::noboolalpha << dendl;
+  dout(1) << __func__ << " slow2fast " << std::boolalpha << promote
+          << std::noboolalpha
+          << ", preallocated " << txc->preallocated
+          << ", txc " << txc
+          << ", min_alloc_size " << min_alloc_size
+          << dendl;
   if (r < 0)
     goto out;
 
