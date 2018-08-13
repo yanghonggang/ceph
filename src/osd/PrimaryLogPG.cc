@@ -5973,6 +5973,18 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	    t->nop(soid);
 	  }
 	} else {
+          // cache is full, before extend an object on fast dev,
+          // migrate it to slow dev first(hope slow dev is not full)
+          if ((op.extent.offset + op.extent.length > oi.size) && 
+              (agent_state->evict_mode == TierAgentState::EVICT_MODE_FULL) &&
+              oi.is_on_tier()) {
+            oi.clear_on_tier();
+            t->set_alloc_hint(oi.soid, oi.expected_object_size,
+                              oi.expected_write_size, obs.oi.alloc_hint_flags);
+            dout(1) << __func__ << " cache is full, migrate to slow dev first: "
+                    << oi
+                    << dendl;
+          }
 	  t->write(
 	    soid, op.extent.offset, op.extent.length, osd_op.indata, op.flags);
 	}
