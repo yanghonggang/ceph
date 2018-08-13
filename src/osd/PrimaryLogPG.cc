@@ -13469,14 +13469,18 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
   ctx->at_version = get_next_version();
 
   finish_ctx(ctx.get(), pg_log_entry_t::MODIFY);
+  auto start = ceph_clock_now();
   ctx->register_on_success(
-    [this, soid, oi, promote]() {
+    [this, soid, oi, promote, start]() {
       osd->agent_finish_op(soid);
       if (promote) {
         osd->promote_finish(oi.size);
         osd->logger->inc(l_osd_tier_promote);
+        osd->logger->tinc(l_osd_tier_promote_lat, ceph_clock_now() - start);
       } else {
         osd->logger->inc(l_osd_tier_evict);
+        // FIXME: l_osd_tier_flush_lat => l_osd_tier_evict_lat
+        osd->logger->tinc(l_osd_tier_flush_lat, ceph_clock_now() - start);
       }
     });
   PGTransaction *t = ctx->op_t.get();
@@ -13777,6 +13781,8 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
   // get dirty, full ratios
   uint64_t dirty_micro = 0;
   uint64_t full_micro = 0;
+  uint64_t dev_full_micro = 0;
+  uint64_t full_objects_micro = 0;
   if (pool.info.target_max_bytes && num_user_objects > 0) {
     uint64_t avg_size = num_user_bytes / num_user_objects;
     dirty_micro =
@@ -13788,7 +13794,7 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
     if (local_mode) {
       float dev_full_ratio = osd->get_fast_full_ratio();
       // let's leave 0.1 safe margin
-      uint64_t dev_full_micro = MIN(1000000, 
+      dev_full_micro = MIN(1000000, 
                                     uint64_t(dev_full_ratio * 1000000 * 1.1));
  
       dout(1) << __func__
@@ -13804,14 +13810,17 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
       MAX(pool.info.target_max_objects / divisor, 1);
     if (dirty_objects_micro > dirty_micro)
       dirty_micro = dirty_objects_micro;
-    uint64_t full_objects_micro =
+    full_objects_micro =
       num_user_objects * 1000000 /
       MAX(pool.info.target_max_objects / divisor, 1);
     if (full_objects_micro > full_micro)
       full_micro = full_objects_micro;
   }
   dout(1) << __func__ << " dirty " << ((float)dirty_micro / 1000000.0)
-	   << " full " << ((float)full_micro / 1000000.0)
+	   << ", full " << ((float)full_micro / 1000000.0)
+	   << ", dev_full " << ((float)dev_full_micro / 1000000.0)
+	   << ", full_objects " << ((float)full_objects_micro / 1000000.0)
+           << ", divisor " << divisor
 	   << dendl;
 
   // flush mode
