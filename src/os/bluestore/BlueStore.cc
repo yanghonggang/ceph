@@ -11651,6 +11651,8 @@ int BlueStore::_set_alloc_hint(
   if ((old_flags ^ flags) & CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER) {
     int r = _move_data_between_tiers(txc, c, o, flags);
     if (r < 0) {
+      derr << __func__ << "_move_data_between_tiers error: " << r
+           << dendl;
       txc->rval = r;
       goto out;
     }
@@ -11678,14 +11680,14 @@ int BlueStore::_move_data_between_tiers(
   utime_t start = ceph_clock_now();
   int r = 0;
   bool promote = (flags & CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER);
+  bufferlist bl;
 
   uint64_t size = o->onode.size;
   if (size == 0) {
     o->onode.alloc_hint_flags = flags;
-    return r;
+    goto out;
   }
 
-  bufferlist bl;
   r = _do_read(c.get(), o, 0, size, bl, 0);
   if (r < 0)
     goto out;
@@ -11715,15 +11717,15 @@ int BlueStore::_move_data_between_tiers(
   r = _do_write(txc, c, o, 0, size, bl, 0);
   assert(r == 0);
 
-  {
-    auto lat = ceph_clock_now() - start;
-    if (promote)
-      logger->tinc(l_bluestore_slow_2_fast_lat, lat);
-    else
-      logger->tinc(l_bluestore_fast_2_slow_lat, lat);
-  }
  out:
-   return r;
+   if (r == 0) {
+     auto lat = ceph_clock_now() - start;
+     if (promote)
+       logger->tinc(l_bluestore_slow_2_fast_lat, lat);
+     else
+       logger->tinc(l_bluestore_fast_2_slow_lat, lat);
+  }
+  return r;
 }
 
 int BlueStore::_clone(TransContext *txc,

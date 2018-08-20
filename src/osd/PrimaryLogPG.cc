@@ -13473,12 +13473,12 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
     return false; 
   }
 
+  ctx->at_version = get_next_version();
   object_info_t& oi = ctx->new_obs.oi;
   // change hint flags to trigger a migration
   oi.alloc_hint_flags ^= CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER;
 
   osd->agent_start_op(soid);
-  ctx->at_version = get_next_version();
 
   finish_ctx(ctx.get(), pg_log_entry_t::MODIFY);
   auto start = ceph_clock_now();
