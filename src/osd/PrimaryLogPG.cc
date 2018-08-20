@@ -13475,8 +13475,6 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
 
   ctx->at_version = get_next_version();
   object_info_t& oi = ctx->new_obs.oi;
-  // change hint flags to trigger a migration
-  oi.alloc_hint_flags ^= CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER;
 
   osd->agent_start_op(soid);
 
@@ -13496,11 +13494,14 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
       }
     });
   PGTransaction *t = ctx->op_t.get();
+  // change hint flags to trigger a migration
   if (promote) {
+    assert(!oi.is_on_tier());
     ctx->delta_stats.num_bytes_fast += oi.size;
     ctx->delta_stats.num_objects_fast++;
     oi.set_on_tier();
   } else {
+    assert(oi.is_on_tier());
     ctx->delta_stats.num_bytes_fast -= oi.size;
     ctx->delta_stats.num_objects_fast--;
     oi.clear_on_tier();
@@ -13508,6 +13509,9 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
   t->set_alloc_hint(soid, oi.expected_object_size, oi.expected_write_size,
                     oi.alloc_hint_flags);
   ctx->delta_stats.num_wr++;
+  ctx->delta_stats.num_rd++;
+  // apply the update
+  ctx->obc->obs = ctx->new_obs;
   simple_opc_submit(std::move(ctx));
  
   return true;
