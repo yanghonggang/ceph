@@ -5975,7 +5975,7 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	} else {
           // cache is full, before extend an object on fast dev,
           // migrate it to slow dev first(hope slow dev is not full)
-          if ((op.extent.offset + op.extent.length > oi.size) && 
+          if (agent_state && (op.extent.offset + op.extent.length > oi.size) && 
               (agent_state->evict_mode == TierAgentState::EVICT_MODE_FULL) &&
               oi.is_on_tier()) {
             oi.clear_on_tier();
