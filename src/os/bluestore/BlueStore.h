@@ -119,6 +119,8 @@ enum {
   l_bluestore_extent_compress,
   l_bluestore_gc_merged,
   l_bluestore_read_eio,
+  l_bluestore_fast_2_slow_lat,
+  l_bluestore_slow_2_fast_lat,
   l_bluestore_last
 };
 
@@ -1528,6 +1530,8 @@ public:
       case l_bluestore_state_deferred_cleanup_lat: return "deferred_cleanup";
       case l_bluestore_state_finishing_lat: return "finishing";
       case l_bluestore_state_done_lat: return "done";
+      case l_bluestore_fast_2_slow_lat: return "fast_2_slow";
+      case l_bluestore_slow_2_fast_lat: return "slow_2_fast";
       }
       return "???";
     }

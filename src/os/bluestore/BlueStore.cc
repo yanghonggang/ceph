@@ -3991,6 +3991,11 @@ void BlueStore::_init_logger()
 		    "collection");
   b.add_u64_counter(l_bluestore_read_eio, "bluestore_read_eio",
                     "Read EIO errors propagated to high level callers");
+  b.add_time_avg(l_bluestore_fast_2_slow_lat, "fast_2_slow",
+    "migrate from fast to slow dev latency");
+  b.add_time_avg(l_bluestore_slow_2_fast_lat, "slow_2_fast",
+    "migrate from slow to fast dev latency");
+
   logger = b.create_perf_counters();
   cct->get_perfcounters_collection()->add(logger);
 }
@@ -11670,6 +11675,7 @@ int BlueStore::_move_data_between_tiers(
 		     OnodeRef& o,
 		     uint32_t flags)
 {
+  utime_t start = ceph_clock_now();
   int r = 0;
   bool promote = (flags & CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER);
 
@@ -11709,6 +11715,13 @@ int BlueStore::_move_data_between_tiers(
   r = _do_write(txc, c, o, 0, size, bl, 0);
   assert(r == 0);
 
+  {
+    auto lat = ceph_clock_now() - start;
+    if (promote)
+      logger->tinc(l_bluestore_slow_2_fast_lat, lat);
+    else
+      logger->tinc(l_bluestore_fast_2_slow_lat, lat);
+  }
  out:
    return r;
 }
