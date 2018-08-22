@@ -74,7 +74,7 @@ void usage(ostream& out)
 "   purge <pool-name> --yes-i-really-really-mean-it\n"
 "                                    remove all objects from pool <pool-name> without removing it\n"
 "   df                               show per-pool and total usage\n"
-"   ls                               list objects in pool\n\n"
+"   ls [--more]                      list objects in pool\n\n"
 "   chown 123                        change the pool owner to auid 123\n"
 "\n"
 "POOL SNAP COMMANDS\n"
@@ -1714,6 +1714,7 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
   bool hints = true; // for rados bench
   bool inline_small = false; // for rados bench, inline small write
   bool hint_fast = false; // hint object should be stored in fast dev
+  bool more = false; // show data location info
   bool no_verify = false;
   bool use_striper = false;
   bool with_clones = false;
@@ -1907,6 +1908,10 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
   i = opts.find("fast");
   if (i != opts.end()) {
     hint_fast = true;
+  }
+  i = opts.find("more");
+  if (i != opts.end()) {
+    more = true;
   }
   i = opts.find("pretty-format");
   if (i != opts.end()) {
@@ -2266,6 +2271,8 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
 	    }
 	    if (i->get_locator().size())
 	      *outstream << "\t" << i->get_locator();
+            if (more)
+	      *outstream << "\t" << (i->is_on_fast() ? "fast" : "slow");
 	    *outstream << std::endl;
 	  } else {
 	    formatter->open_object_section("object");
@@ -2277,6 +2284,8 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
 	    }
 	    if (i->get_locator().size())
 	      formatter->dump_string("locator", i->get_locator());
+            if (more)
+              formatter->dump_bool("fast", i->is_on_fast());
 	    formatter->close_section(); //object
 	  }
 	}
@@ -3736,6 +3745,8 @@ int main(int argc, const char **argv)
       opts["inline"] = "true";
     } else if (ceph_argparse_flag(args, i, "--fast", (char*)NULL)) {
       opts["fast"] = "true";
+    } else if (ceph_argparse_flag(args, i, "--more", (char*)NULL)) {
+      opts["more"] = "true";
     } else if (ceph_argparse_flag(args, i, "--no-verify", (char*)NULL)) {
       opts["no-verify"] = "true";
     } else if (ceph_argparse_witharg(args, i, &val, "--run-name", (char*)NULL)) {

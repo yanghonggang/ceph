@@ -4189,7 +4189,7 @@ struct pg_nls_response_t {
   list<librados::ListObjectImpl> entries;
 
   void encode(bufferlist& bl) const {
-    ENCODE_START(1, 1, bl);
+    ENCODE_START(2, 1, bl);
     ::encode(handle, bl);
     __u32 n = (__u32)entries.size();
     ::encode(n, bl);
@@ -4197,11 +4197,12 @@ struct pg_nls_response_t {
       ::encode(i->nspace, bl);
       ::encode(i->oid, bl);
       ::encode(i->locator, bl);
+      ::encode(i->on_fast, bl);
     }
     ENCODE_FINISH(bl);
   }
   void decode(bufferlist::iterator& bl) {
-    DECODE_START(1, bl);
+    DECODE_START(2, bl);
     ::decode(handle, bl);
     __u32 n;
     ::decode(n, bl);
@@ -4211,6 +4212,8 @@ struct pg_nls_response_t {
       ::decode(i.nspace, bl);
       ::decode(i.oid, bl);
       ::decode(i.locator, bl);
+      if (struct_v >= 2)
+        ::decode(i.on_fast, bl);
       entries.push_back(i);
     }
     DECODE_FINISH(bl);

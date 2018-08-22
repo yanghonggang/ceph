@@ -1172,6 +1172,8 @@ void PrimaryLogPG::do_pg_op(OpRequestRef op)
         dout(10) << " pgnls pg=" << m->get_pg() << " count " << list_size << dendl;
 	// read into a buffer
         vector<hobject_t> sentries;
+        vector<bool> fast;
+
         pg_nls_response_t response;
 	try {
 	  ::decode(response.handle, bp);
@@ -1204,15 +1206,24 @@ void PrimaryLogPG::do_pg_op(OpRequestRef op)
 	  list_size,
 	  list_size,
 	  &sentries,
-	  &next);
+	  &next,
+          &fast);
 	if (r != 0) {
 	  result = -EINVAL;
 	  break;
 	}
 
+        assert(fast.size() == sentries.size());
+        map<hobject_t, bool> entries;
+        for (size_t i = 0; i < sentries.size(); i++) {
+          entries[sentries[i]] = fast[i];
+          dout(30) << "<" << sentries[i] << ", " << fast[i] << ">" << dendl;
+        }
+
 	map<hobject_t, pg_missing_item>::const_iterator missing_iter =
 	  pg_log.get_missing().get_items().lower_bound(current);
 	vector<hobject_t>::iterator ls_iter = sentries.begin();
+        auto fast_iter = fast.begin();
 	hobject_t _max = hobject_t::get_max();
 	while (1) {
 	  const hobject_t &mcand =
@@ -1229,6 +1240,7 @@ void PrimaryLogPG::do_pg_op(OpRequestRef op)
 	    candidate = mcand;
 	    if (!mcand.is_max()) {
 	      ++ls_iter;
+              ++fast_iter;
 	      ++missing_iter;
 	    }
 	  } else if (mcand < lcand) {
@@ -1239,6 +1251,7 @@ void PrimaryLogPG::do_pg_op(OpRequestRef op)
 	    candidate = lcand;
 	    assert(!lcand.is_max());
 	    ++ls_iter;
+            ++fast_iter;
 	  }
 
           dout(10) << " pgnls candidate 0x" << std::hex << candidate.get_hash()
@@ -1275,16 +1288,19 @@ void PrimaryLogPG::do_pg_op(OpRequestRef op)
 	  if (filter && !pgls_filter(filter, candidate, filter_out))
 	    continue;
 
-          dout(20) << "pgnls item 0x" << std::hex
+          dout(1) << "pgnls item 0x" << std::hex
             << candidate.get_hash()
             << ", rev 0x" << hobject_t::_reverse_bits(candidate.get_hash())
             << std::dec << " "
-            << candidate.oid.name << dendl;
+            << candidate.oid.name
+            << " , fast " << entries[candidate]
+            << dendl;
 
 	  librados::ListObjectImpl item;
 	  item.nspace = candidate.get_namespace();
 	  item.oid = candidate.oid.name;
 	  item.locator = candidate.get_key();
+	  item.on_fast = entries[candidate];
 	  response.entries.push_back(item);
 	}
 

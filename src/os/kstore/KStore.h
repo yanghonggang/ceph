@@ -485,11 +485,15 @@ public:
   int collection_list(
     const coll_t& cid, const ghobject_t& start, const ghobject_t& end,
     int max,
-    vector<ghobject_t> *ls, ghobject_t *next) override;
+    vector<ghobject_t> *ls,
+    ghobject_t *next,
+    vector<bool> *fast = NULL) override;
   int collection_list(
     CollectionHandle &c, const ghobject_t& start, const ghobject_t& end,
     int max,
-    vector<ghobject_t> *ls, ghobject_t *next) override;
+    vector<ghobject_t> *ls,
+    ghobject_t *next,
+    vector<bool> *fast = NULL) override;
 
   using ObjectStore::omap_get;
   int omap_get(

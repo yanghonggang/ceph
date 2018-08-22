@@ -7460,17 +7460,17 @@ int BlueStore::collection_bits(const coll_t& cid)
 
 int BlueStore::collection_list(
   const coll_t& cid, const ghobject_t& start, const ghobject_t& end, int max,
-  vector<ghobject_t> *ls, ghobject_t *pnext)
+  vector<ghobject_t> *ls, ghobject_t *pnext, vector<bool> *fast)
 {
   CollectionHandle c = _get_collection(cid);
   if (!c)
     return -ENOENT;
-  return collection_list(c, start, end, max, ls, pnext);
+  return collection_list(c, start, end, max, ls, pnext, fast);
 }
 
 int BlueStore::collection_list(
   CollectionHandle &c_, const ghobject_t& start, const ghobject_t& end, int max,
-  vector<ghobject_t> *ls, ghobject_t *pnext)
+  vector<ghobject_t> *ls, ghobject_t *pnext, vector<bool> *fast)
 {
   Collection *c = static_cast<Collection *>(c_.get());
   dout(15) << __func__ << " " << c->cid
@@ -7478,7 +7478,7 @@ int BlueStore::collection_list(
   int r;
   {
     RWLock::RLocker l(c->lock);
-    r = _collection_list(c, start, end, max, ls, pnext);
+    r = _collection_list(c, start, end, max, ls, pnext, fast);
   }
 
   dout(10) << __func__ << " " << c->cid
@@ -7490,7 +7490,7 @@ int BlueStore::collection_list(
 
 int BlueStore::_collection_list(
   Collection *c, const ghobject_t& start, const ghobject_t& end, int max,
-  vector<ghobject_t> *ls, ghobject_t *pnext)
+  vector<ghobject_t> *ls, ghobject_t *pnext, vector<bool> *fast)
 {
 
   if (!c->exists)
@@ -7590,6 +7590,12 @@ int BlueStore::_collection_list(
       break;
     }
     ls->push_back(oid);
+    if (fast) {
+      OnodeRef o = c->get_onode(oid, false);
+      bool on_fast = o->onode.alloc_hint_flags & CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER;
+      dout(1) << __func__ << " oid " << oid << ", fast " << on_fast << dendl;
+      fast->push_back(on_fast);
+    }
     it->next();
   }
 out:

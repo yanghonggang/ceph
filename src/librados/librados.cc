@@ -802,9 +802,10 @@ void librados::NObjectIteratorImpl::set_filter(const bufferlist &bl)
 void librados::NObjectIteratorImpl::get_next()
 {
   const char *entry, *key, *nspace;
+  int fast = 0;
   if (ctx->nlc->at_end())
     return;
-  int ret = rados_nobjects_list_next(ctx.get(), &entry, &key, &nspace);
+  int ret = rados_nobjects_list_next2(ctx.get(), &entry, &key, &nspace, &fast);
   if (ret == -ENOENT) {
     return;
   }
@@ -819,6 +820,7 @@ void librados::NObjectIteratorImpl::get_next()
   cur_obj.impl->nspace = nspace;
   cur_obj.impl->oid = entry;
   cur_obj.impl->locator = key ? key : string();
+  cur_obj.impl->on_fast = fast; 
 }
 
 uint32_t librados::NObjectIteratorImpl::get_pg_hash_position() const
@@ -4585,7 +4587,19 @@ extern "C" uint32_t rados_nobjects_list_get_pg_hash_position(
   return retval;
 }
 
-extern "C" int rados_nobjects_list_next(rados_list_ctx_t listctx, const char **entry, const char **key, const char **nspace)
+extern "C" int rados_nobjects_list_next(rados_list_ctx_t listctx,
+                                        const char **entry,
+                                        const char **key,
+                                        const char **nspace)
+{
+  return rados_nobjects_list_next2(listctx, entry, key, nspace, NULL);
+}
+
+extern "C" int rados_nobjects_list_next2(rados_list_ctx_t listctx,
+                                        const char **entry,
+                                        const char **key,
+                                        const char **nspace,
+                                        int* fast)
 {
   tracepoint(librados, rados_nobjects_list_next_enter, listctx);
   librados::ObjListCtx *lh = (librados::ObjListCtx *)listctx;
@@ -4618,6 +4632,8 @@ extern "C" int rados_nobjects_list_next(rados_list_ctx_t listctx, const char **e
   }
   if (nspace)
     *nspace = h->list.front().nspace.c_str();
+  if (fast)
+    *fast = h->list.front().is_on_fast();
   tracepoint(librados, rados_nobjects_list_next_exit, 0, *entry, key, nspace);
   return 0;
 }
@@ -6311,6 +6327,11 @@ const std::string& librados::ListObject::get_oid() const
 const std::string& librados::ListObject::get_locator() const
 {
   return impl->get_locator();
+}
+
+bool librados::ListObject::is_on_fast() const
+{
+  return impl->is_on_fast();
 }
 
 std::ostream& librados::operator<<(std::ostream& out, const librados::ListObject& lop)

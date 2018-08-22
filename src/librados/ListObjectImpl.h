@@ -23,6 +23,7 @@ struct ListObjectImpl {
   std::string nspace;
   std::string oid;
   std::string locator;
+  bool on_fast = false;
 
   ListObjectImpl() {}
   ListObjectImpl(std::string n, std::string o, std::string l):
@@ -31,12 +32,14 @@ struct ListObjectImpl {
   const std::string& get_nspace() const { return nspace; }
   const std::string& get_oid() const { return oid; }
   const std::string& get_locator() const { return locator; }
+  bool is_on_fast() const { return on_fast; }
 };
-WRITE_EQ_OPERATORS_3(ListObjectImpl, nspace, oid, locator)
-WRITE_CMP_OPERATORS_3(ListObjectImpl, nspace, oid, locator)
+WRITE_EQ_OPERATORS_4(ListObjectImpl, nspace, oid, locator, on_fast)
+WRITE_CMP_OPERATORS_4(ListObjectImpl, nspace, oid, locator, on_fast)
 inline std::ostream& operator<<(std::ostream& out, const struct ListObjectImpl& lop) {
   out << (lop.nspace.size() ? lop.nspace + "/" : "") << lop.oid
-      << (lop.locator.size() ? "@" + lop.locator : "");
+      << (lop.locator.size() ? "@" + lop.locator : "")
+      << ", fast " << lop.on_fast;
   return out;
 }
 

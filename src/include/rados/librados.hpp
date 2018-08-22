@@ -57,6 +57,7 @@ namespace librados
     const std::string& get_nspace() const;
     const std::string& get_oid() const;
     const std::string& get_locator() const;
+    bool is_on_fast() const;
 
     ListObject();
     ~ListObject();
