@@ -5507,6 +5507,10 @@ int BlueStore::mkfs()
     r = _open_fm_fast(true);
     if (r < 0)
       goto out_close_bdev_fast;
+    r = write_meta("init_tier_done", "done");
+    if (r < 0) {
+      goto out_close_bdev_fast;
+    }
   }
 
   {
@@ -5670,17 +5674,33 @@ int BlueStore::_mount(bool kv_only)
     goto out_fm;
 
   if (cct->_conf->bluestore_block_fast_create) {
-    r = _open_bdev_fast(false);
+    string init_tier_done;
+    bool create = false;
+    r = read_meta("init_tier_done", &init_tier_done);
+    if (r == -ENOENT) {
+      create = true;
+      dout(1) << __func__ << " try to init tier" << dendl;
+      r = _setup_block_symlink_or_file("block.fast", cct->_conf->bluestore_block_fast_path,
+	  cct->_conf->bluestore_block_fast_size,
+	  cct->_conf->bluestore_block_fast_create);
+    }
+    if (r < 0 && r != -EEXIST)
+      goto out_alloc;
+    r = _open_bdev_fast(create);
      if (r < 0)
        goto out_alloc;
  
-    r = _open_fm_fast(false);
+    r = _open_fm_fast(create);
     if (r < 0)
       goto out_bdev_fast;
 
     r = _open_alloc_fast();
     if (r < 0)
       goto out_fm_fast;
+
+    r = write_meta("init_tier_done", "done");
+    if (r < 0 && r != -EEXIST)
+      goto out_alloc_fast;
   }
 
   r = _open_collections();
