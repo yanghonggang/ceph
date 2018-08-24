@@ -3336,7 +3336,7 @@ std::vector<Option> get_global_options() {
     .set_description("Size of file to create for backing bluestore fast tier"),
 
     Option("bluestore_block_fast_create", Option::TYPE_BOOL, Option::LEVEL_DEV)
-    .set_default(true)
+    .set_default(false)
     .add_tag("mkfs")
     .set_description("Create bluestore_block_fast_path if it doesn't exist")
     .add_see_also("bluestore_block_fast_path").add_see_also("bluestore_block_fast_size"),
