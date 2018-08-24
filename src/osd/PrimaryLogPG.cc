@@ -4576,7 +4576,7 @@ void PrimaryLogPG::maybe_create_new_object(
     obs.oi.new_object();
     if (!ignore_transaction)
       ctx->op_t->create(obs.oi.soid);
-    if ((agent_state && agent_state->evict_mode !=
+    if (!ignore_transaction && (agent_state && agent_state->evict_mode !=
          TierAgentState::EVICT_MODE_FULL) &&
         pool.info.cache_local_mode_default_fast) {
       // force create on fast device
@@ -4590,7 +4590,7 @@ void PrimaryLogPG::maybe_create_new_object(
       dout(1) << __func__ << " " << agent_state->get_evict_mode_name()
               << " " << obs.oi
               << dendl;
-    if (obs.oi.is_on_tier())
+    if (!ignore_transaction && obs.oi.is_on_tier())
       ctx->delta_stats.num_objects_fast++;
   } else if (obs.oi.is_whiteout()) {
     dout(10) << __func__ << " clearing whiteout on " << obs.oi.soid << dendl;
@@ -5962,11 +5962,11 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	    if (op.extent.truncate_size != oi.size) {
 	      ctx->delta_stats.num_bytes -= oi.size;
 	      ctx->delta_stats.num_bytes += op.extent.truncate_size;
-	      oi.size = op.extent.truncate_size;
               if (oi.is_on_tier()) {
                 ctx->delta_stats.num_bytes_fast -= oi.size;
                 ctx->delta_stats.num_bytes_fast += op.extent.truncate_size;
               }
+	      oi.size = op.extent.truncate_size;
 	    }
 	  } else {
 	    dout(10) << " truncate_seq " << op.extent.truncate_seq << " > current " << seq
@@ -6160,11 +6160,11 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	if (op.extent.offset != oi.size) {
 	  ctx->delta_stats.num_bytes -= oi.size;
 	  ctx->delta_stats.num_bytes += op.extent.offset;
-	  oi.size = op.extent.offset;
           if (oi.is_on_tier()) {
             ctx->delta_stats.num_bytes_fast -= oi.size;
             ctx->delta_stats.num_bytes_fast += op.extent.offset;
           }
+	  oi.size = op.extent.offset;
 	}
 	ctx->delta_stats.num_wr++;
 	// do no set exists, or we will break above DELETE -> TRUNCATE munging.
@@ -7251,10 +7251,10 @@ int PrimaryLogPG::_rollback_to(OpContext *ctx, ceph_osd_op& op)
       maybe_create_new_object(ctx, true);
       ctx->delta_stats.num_bytes -= obs.oi.size;
       ctx->delta_stats.num_bytes += rollback_to->obs.oi.size;
-      if (obs.oi.is_on_tier())
+      if (obs.oi.is_on_tier()) {
         ctx->delta_stats.num_bytes_fast -= obs.oi.size;
-      if (rollback_to->obs.oi.is_on_tier())
         ctx->delta_stats.num_bytes_fast += rollback_to->obs.oi.size;
+      }
       obs.oi.size = rollback_to->obs.oi.size;
       if (rollback_to->obs.oi.is_data_digest())
 	obs.oi.set_data_digest(rollback_to->obs.oi.data_digest);
@@ -7479,14 +7479,13 @@ void PrimaryLogPG::write_update_size_and_usage(object_stat_sum_t& delta_stats, o
   modified.union_of(ch);
   if (write_full || offset + length > oi.size) {
     uint64_t new_size = offset + length;
-    uint64_t old_size = oi.size;
     delta_stats.num_bytes -= oi.size;
     delta_stats.num_bytes += new_size;
-    oi.size = new_size;
     if (oi.is_on_tier()) {
-      delta_stats.num_bytes_fast -= old_size;
+      delta_stats.num_bytes_fast -= oi.size;
       delta_stats.num_bytes_fast += new_size;
     }
+    oi.size = new_size;
   }
   delta_stats.num_wr++;
   delta_stats.num_wr_kb += SHIFT_ROUND_UP(length, 10);
@@ -10391,12 +10390,14 @@ void PrimaryLogPG::add_object_context_to_pg_stat(ObjectContextRef obc, pg_stat_t
   object_stat_sum_t stat;
 
   stat.num_bytes += oi.size;
-
-  if (oi.soid.snap != CEPH_SNAPDIR)
-    stat.num_objects++;
   if (oi.is_on_tier()) {
     stat.num_bytes_fast += oi.size;
-    stat.num_objects_fast++;
+  }
+  if (oi.soid.snap != CEPH_SNAPDIR) {
+    stat.num_objects++;
+    if (oi.is_on_tier()) {
+      stat.num_objects_fast++;
+    }
   }
   if (oi.is_dirty())
     stat.num_objects_dirty++;
@@ -13029,14 +13030,23 @@ void PrimaryLogPG::hit_set_persist()
   obc->obs.exists = true;
   obc->obs.oi.set_data_digest(bl.crc32c(-1));
 
+  // force create hit object on fast dev
+  obc->obs.oi.set_on_tier();
+  ctx->op_t->set_alloc_hint(obc->obs.oi.soid,
+                            obc->obs.oi.size,
+                            obc->obs.oi.size,
+                            obc->obs.oi.alloc_hint_flags);
+
   ctx->new_obs = obc->obs;
 
   obc->ssc->snapset.head_exists = true;
   ctx->new_snapset = obc->ssc->snapset;
 
   ctx->delta_stats.num_objects++;
+  ctx->delta_stats.num_objects_fast++;
   ctx->delta_stats.num_objects_hit_set_archive++;
   ctx->delta_stats.num_bytes += bl.length();
+  ctx->delta_stats.num_bytes_fast += bl.length();
   ctx->delta_stats.num_bytes_hit_set_archive += bl.length();
 
   bufferlist bss;
@@ -13100,8 +13110,10 @@ void PrimaryLogPG::hit_set_trim(OpContextUPtr &ctx, unsigned max)
     ObjectContextRef obc = get_object_context(oid, false);
     assert(obc);
     --ctx->delta_stats.num_objects;
+    --ctx->delta_stats.num_objects_fast;
     --ctx->delta_stats.num_objects_hit_set_archive;
     ctx->delta_stats.num_bytes -= obc->obs.oi.size;
+    ctx->delta_stats.num_bytes_fast -= obc->obs.oi.size;
     ctx->delta_stats.num_bytes_hit_set_archive -= obc->obs.oi.size;
   }
 }
@@ -13431,7 +13443,10 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
     osd->logger->inc(l_osd_agent_skip);
     return false;
   }
-    
+
+  // NOTE:
+  // we don't need to wait for all clone objects are demoted
+   
   bool evict_mode_full =
         (agent_state->evict_mode == TierAgentState::EVICT_MODE_FULL);
 
