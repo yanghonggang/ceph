@@ -5900,7 +5900,7 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	maybe_create_new_object(ctx);
         t->set_alloc_hint(soid, op.alloc_hint.expected_object_size,
                           op.alloc_hint.expected_write_size,
-			  op.alloc_hint.flags);
+			  oi.alloc_hint_flags);
         ctx->delta_stats.num_wr++;
         result = 0;
       }
