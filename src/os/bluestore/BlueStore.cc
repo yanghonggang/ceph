@@ -11703,6 +11703,11 @@ int BlueStore::_move_data_between_tiers(
 		     OnodeRef& o,
 		     uint32_t flags)
 {
+  if (g_conf->bluestore_inject_migration_err) {
+    dout(0) << __func__ << ": inject random migration error, "
+            << o->oid << dendl;
+    return -EIO;
+  }
   utime_t start = ceph_clock_now();
   int r = 0;
   bool promote = (flags & CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER);
