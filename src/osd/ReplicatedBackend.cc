@@ -715,8 +715,9 @@ void ReplicatedBackend::be_deep_scrub(
   bufferlist bl, hdrbl;
   int r;
   __u64 pos = 0;
-
-  uint32_t fadvise_flags = CEPH_OSD_OP_FLAG_FADVISE_SEQUENTIAL | CEPH_OSD_OP_FLAG_FADVISE_DONTNEED;
+  uint32_t fadvise_flags = CEPH_OSD_OP_FLAG_FADVISE_SEQUENTIAL |
+                           CEPH_OSD_OP_FLAG_FADVISE_DONTNEED |
+                           CEPH_OSD_OP_FLAG_BYPASS_CLEAN_CACHE;
 
   while (true) {
     handle.reset_tp_timeout();
