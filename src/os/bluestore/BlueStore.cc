@@ -11711,6 +11711,7 @@ int BlueStore::_move_data_between_tiers(
   uint64_t size = o->onode.size;
   if (size == 0) {
     o->onode.alloc_hint_flags = flags;
+    txc->write_onode(o);
     goto out;
   }
 
