@@ -2399,7 +2399,7 @@ void pg_stat_t::encode(bufferlist &bl) const
 void pg_stat_t::decode(bufferlist::iterator &bl)
 {
   bool tmp;
-  DECODE_START(22, bl);
+  DECODE_START(23, bl);
   ::decode(version, bl);
   ::decode(reported_seq, bl);
   ::decode(reported_epoch, bl);
