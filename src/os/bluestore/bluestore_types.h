@@ -159,8 +159,11 @@ struct bluestore_pextent_t : public AllocExtent {
   bool is_on_fast_tier() const {
     return is_valid() && (offset & FAST_TIER_MASK);
   }
+  void set_on_fast_tier() {
+    offset |= FAST_TIER_MASK;
+  }
   uint64_t get_offset() const {
-    return offset & ~FAST_TIER_MASK;
+    return is_valid() ? (offset & ~FAST_TIER_MASK) : offset;
   }
   DENC(bluestore_pextent_t, v, p) {
     denc_lba(v.offset, p);
@@ -647,7 +650,7 @@ public:
     if (plen)
       *plen = p->length - x_off;
 
-    assert((p->offset + x_off) >= x_off);
+    assert((p->get_offset() + x_off) >= x_off);
     return p->get_offset() + x_off;
   }
 

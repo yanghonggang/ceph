@@ -10691,8 +10691,7 @@ int BlueStore::_do_alloc_write(
         txc->allocated.insert(p.offset, p.length);
       }
     }
-    // don't need to set fast tag, as this is not a deferred io
-    dblob.allocated(P2ALIGN(b_off, min_alloc_size), final_length, extents/*, bdev_target == bdev_fast*/);
+    dblob.allocated(P2ALIGN(b_off, min_alloc_size), final_length, extents, bdev_target == bdev_fast);
 
     dout(20) << __func__ << " blob " << *b << dendl;
     if (dblob.has_csum()) {

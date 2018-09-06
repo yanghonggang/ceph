@@ -840,11 +840,30 @@ void bluestore_blob_t::allocated(uint32_t b_off, uint32_t length, const AllocExt
     }
     for(auto& e : allocs) {
       *start_it = e;
+      if (start_it->is_valid() && bdev_fast)
+        start_it->set_on_fast_tier();
       ++start_it;
     }
     if (tail) {
       start_it->length = tail;
     } 
+  }
+  // capture the first different alloc type
+  {
+    bool fast = false;
+    bool fast_ok = false; 
+    for (const auto& pe : extents) {
+      if (pe.is_valid()) {
+        if (!fast_ok) {
+          fast_ok = true;
+          fast = pe.is_on_fast_tier();
+          assert(pe.is_on_fast_tier() == bdev_fast);
+        } else {
+          assert(pe.is_on_fast_tier() == fast);
+          assert(pe.is_on_fast_tier() == bdev_fast);
+        }
+      }
+    }
   }
 }
 
@@ -863,13 +882,13 @@ struct vecbuilder {
       invalid = 0;
     }
   }
-  void add(uint64_t offset, uint64_t length) {
+  void add(uint64_t offset, uint64_t length, bool fast = false) {
     if (offset == bluestore_pextent_t::INVALID_OFFSET) {
       add_invalid(length);
     }
     else {
       flush();
-      v.emplace_back(bluestore_pextent_t(offset, length));
+      v.emplace_back(bluestore_pextent_t(offset, length, fast));
     }
   }
 };
@@ -915,7 +934,8 @@ bool bluestore_blob_t::release_extents(bool all,
       int delta0 = pext_loffs - pext_loffs_start;
       assert(delta0 >= 0);
       if ((uint32_t)delta0 < pext_it->length) {
-	vb.add(pext_it->offset + delta0, pext_it->length - delta0);
+	vb.add(pext_it->offset + delta0, pext_it->length - delta0,
+               pext_it->is_on_fast_tier());
       }
       pext_loffs_start += pext_it->length;
       pext_loffs = pext_loffs_start;
@@ -929,7 +949,8 @@ bool bluestore_blob_t::release_extents(bool all,
       int delta = loffs_it->offset - pext_loffs;
       assert(delta >= 0);
       if (delta > 0) {
-	vb.add(pext_it->offset + delta0, delta);
+	vb.add(pext_it->offset + delta0, delta,
+               pext_it->is_on_fast_tier());
 	pext_loffs += delta;
       }
 
@@ -941,12 +962,13 @@ bool bluestore_blob_t::release_extents(bool all,
       do {
 	uint32_t to_release_part =
 	  MIN(pext_it->length - delta0 - delta, to_release);
-	auto o = pext_it->offset + delta0 + delta;
-	if (last_r != r->end() && last_r->offset + last_r->length == o) {
+	auto o = pext_it->get_offset() + delta0 + delta;
+	if (last_r != r->end() && last_r->get_offset() + last_r->length == o) {
 	  last_r->length += to_release_part;
 	}
 	else {
-	  last_r = r->emplace(r->end(), o, to_release_part);
+	  last_r = r->emplace(r->end(), o, to_release_part,
+                              pext_it->is_on_fast_tier());
 	}
 	to_release -= to_release_part;
 	pext_loffs += to_release_part;
@@ -980,8 +1002,8 @@ void bluestore_blob_t::split(uint32_t blob_offset, bluestore_blob_t& rb)
     }
     if (left) {
       if (p->is_valid()) {
-	rb.extents.emplace_back(bluestore_pextent_t(p->offset + left,
-	  p->length - left));
+	rb.extents.emplace_back(bluestore_pextent_t(p->get_offset() + left,
+	  p->length - left, p->is_on_fast_tier()));
       }
       else {
 	rb.extents.emplace_back(bluestore_pextent_t(
