@@ -165,6 +165,10 @@ struct bluestore_pextent_t : public AllocExtent {
   uint64_t get_offset() const {
     return is_valid() ? (offset & ~FAST_TIER_MASK) : offset;
   }
+  uint64_t end() const {
+    assert(is_valid());
+    return get_offset() + length;
+  }
   DENC(bluestore_pextent_t, v, p) {
     denc_lba(v.offset, p);
     denc_varint_lowz(v.length, p);

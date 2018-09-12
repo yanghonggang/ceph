@@ -2039,8 +2039,8 @@ private:
   void _assign_nid(TransContext *txc, OnodeRef o);
   uint64_t _assign_blobid(TransContext *txc);
 
-  void _dump_onode(const OnodeRef& o, int log_level=30);
-  void _dump_extent_map(ExtentMap& em, int log_level=30);
+  void _dump_onode(const OnodeRef& o, int log_level=30) const;
+  void _dump_extent_map(ExtentMap& em, int log_level=30) const;
   void _dump_transaction(Transaction *t, int log_level = 30);
 
   TransContext *_txc_create(OpSequencer *osr);
@@ -2092,7 +2092,8 @@ private:
     bool compressed,
     mempool_dynamic_bitset &used_blocks,
     uint64_t granularity,
-    store_statfs_t& expected_statfs);
+    store_statfs_t& expected_statfs,
+    bool on_fast = false);
 
   void _buffer_cache_write(
     TransContext *txc,

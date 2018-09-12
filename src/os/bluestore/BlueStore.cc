@@ -5816,10 +5816,12 @@ int BlueStore::_fsck_check_extents(
   bool compressed,
   mempool_dynamic_bitset &used_blocks,
   uint64_t granularity,
-  store_statfs_t& expected_statfs)
+  store_statfs_t& expected_statfs,
+  bool fast_dev)
 {
   dout(30) << __func__ << " oid " << oid << " extents " << extents << dendl;
   int errors = 0;
+  auto bdev_target = (fast_dev ? bdev_fast : bdev);
   for (auto e : extents) {
     if (!e.is_valid())
       continue;
@@ -5827,9 +5829,16 @@ int BlueStore::_fsck_check_extents(
     if (compressed) {
       expected_statfs.compressed_allocated += e.length;
     }
+    if (fast_dev != e.is_on_fast_tier()) {
+      ++errors;
+      derr << " " << oid << " extent " << e
+           << " or a subset is not on right dev"
+           << ", fast_dev is " << fast_dev
+	   << dendl;
+    }
     bool already = false;
     apply(
-      e.offset, e.length, granularity, used_blocks,
+      e.get_offset(), e.length, granularity, used_blocks,
       [&](uint64_t pos, mempool_dynamic_bitset &bs) {
 	assert(pos < bs.size());
 	if (bs.test(pos))
@@ -5842,7 +5851,7 @@ int BlueStore::_fsck_check_extents(
 	   << " or a subset is already allocated" << dendl;
       ++errors;
     }
-    if (e.end() > bdev->get_size()) {
+    if (e.end() > bdev_target->get_size()) {
       derr << " " << oid << " extent " << e
 	   << " past end of block device" << dendl;
       ++errors;
@@ -5854,10 +5863,11 @@ int BlueStore::_fsck_check_extents(
 int BlueStore::_fsck(bool deep, bool repair)
 {
   dout(1) << __func__
-	  << (repair ? " fsck" : " repair")
+	  << (repair ? " repair" : " fsck")
 	  << (deep ? " (deep)" : " (shallow)") << " start" << dendl;
   int errors = 0;
   int repaired = 0;
+  bool tier_exist = false;
 
   typedef btree::btree_set<
     uint64_t,std::less<uint64_t>,
@@ -5867,6 +5877,7 @@ int BlueStore::_fsck(bool deep, bool repair)
   uint64_t_btree_t used_sbids;
 
   mempool_dynamic_bitset used_blocks;
+  mempool_dynamic_bitset used_blocks_fast;
   KeyValueDB::Iterator it;
   store_statfs_t expected_statfs, actual_statfs;
   struct sb_info_t {
@@ -5874,6 +5885,7 @@ int BlueStore::_fsck(bool deep, bool repair)
     SharedBlobRef sb;
     bluestore_extent_ref_map_t ref_map;
     bool compressed;
+    bool fast;
   };
   mempool::bluestore_fsck::map<uint64_t,sb_info_t> sb_info;
 
@@ -5922,7 +5934,18 @@ int BlueStore::_fsck(bool deep, bool repair)
   if (r < 0)
     goto out_fm;
 
-  if (cct->_conf->bluestore_block_fast_create) {
+  {
+    string init_tier_done;
+    r = read_meta("init_tier_done", &init_tier_done);
+    if ((r < 0) && (r != -ENOENT)) {
+      goto out_fm;
+    }
+    if ( r == 0)
+      tier_exist = true;
+    dout(0) << __func__ << " tier exist: " << tier_exist << dendl;
+  }
+
+  if (tier_exist) {
     r = _open_bdev_fast(false);
      if (r < 0)
        goto out_alloc;
@@ -5956,6 +5979,16 @@ int BlueStore::_fsck(bool deep, bool repair)
     }
   );
 
+  if (tier_exist) {
+    used_blocks_fast.resize(fm_fast->get_alloc_units());
+    apply(
+      0, MAX(min_alloc_size, SUPER_RESERVED), fm_fast->get_alloc_size(), used_blocks_fast,
+      [&](uint64_t pos, mempool_dynamic_bitset &bs) {
+        assert(pos < bs.size());
+        bs.set(pos);
+      }
+    );
+  }
   if (bluefs) {
     for (auto e = bluefs_extents.begin(); e != bluefs_extents.end(); ++e) {
       apply(
@@ -6077,6 +6110,10 @@ int BlueStore::_fsck(bool deep, bool repair)
       dout(10) << __func__ << "  " << oid << dendl;
       RWLock::RLocker l(c->lock);
       OnodeRef o = c->get_onode(oid, false);
+      bool on_fast = o->onode.has_hint_flag_fast();
+      if (on_fast) {
+        assert(tier_exist);
+      }
       if (o->onode.nid) {
 	if (o->onode.nid > nid_max) {
 	  derr << "fsck error: " << oid << " nid " << o->onode.nid
@@ -6238,17 +6275,20 @@ int BlueStore::_fsck(bool deep, bool repair)
 	  sbi.sb = i.first->shared_blob;
 	  sbi.oids.push_back(oid);
 	  sbi.compressed = blob.is_compressed();
+          sbi.fast = on_fast;
 	  for (auto e : blob.get_extents()) {
 	    if (e.is_valid()) {
-	      sbi.ref_map.get(e.offset, e.length);
+	      sbi.ref_map.get(e.get_offset(), e.length);
 	    }
 	  }
 	} else {
 	  errors += _fsck_check_extents(oid, blob.get_extents(),
 					blob.is_compressed(),
-					used_blocks,
-					fm->get_alloc_size(),
-					expected_statfs);
+					(on_fast ? used_blocks_fast : used_blocks),
+					(on_fast ? fm_fast->get_alloc_size() :
+                                         fm->get_alloc_size()),
+					expected_statfs,
+                                        on_fast);
         }
       }
       if (deep) {
@@ -6305,14 +6345,16 @@ int BlueStore::_fsck(bool deep, bool repair)
 	}
 	PExtentVector extents;
 	for (auto &r : shared_blob.ref_map.ref_map) {
-	  extents.emplace_back(bluestore_pextent_t(r.first, r.second.length));
+	  extents.emplace_back(bluestore_pextent_t(r.first, r.second.length,
+                                 sbi.fast));
 	}
 	errors += _fsck_check_extents(p->second.oids.front(),
 				      extents,
 				      p->second.compressed,
-				      used_blocks,
-				      fm->get_alloc_size(),
-				      expected_statfs);
+				      (sbi.fast ? used_blocks_fast : used_blocks),
+				      (sbi.fast ? fm_fast->get_alloc_size() :
+                                       fm->get_alloc_size()),
+				      expected_statfs, sbi.fast);
 	sb_info.erase(p);
       }
     }
@@ -6360,6 +6402,7 @@ int BlueStore::_fsck(bool deep, bool repair)
       dout(20) << __func__ << "  deferred " << wt.seq
 	       << " ops " << wt.ops.size()
 	       << " released 0x" << std::hex << wt.released << std::dec << dendl;
+      assert(0);
       for (auto e = wt.released.begin(); e != wt.released.end(); ++e) {
         apply(
           e.get_start(), e.get_len(), fm->get_alloc_size(), used_blocks,
@@ -6444,12 +6487,73 @@ int BlueStore::_fsck(bool deep, bool repair)
       used_blocks.flip();
     }
   }
+  if (tier_exist) {
+    dout(1) << __func__ << " (fast) checking freelist vs allocated" << dendl;
+    fm_fast->enumerate_reset();
+    uint64_t offset, length;
+    while (fm_fast->enumerate_next(&offset, &length)) {
+      bool intersects = false;
+      apply(
+        offset, length, fm_fast->get_alloc_size(), used_blocks_fast,
+        [&](uint64_t pos, mempool_dynamic_bitset &bs) {
+	  assert(pos < bs.size());
+          if (bs.test(pos)) {
+            intersects = true;
+          } else {
+	    bs.set(pos);
+          }
+        }
+      );
+      if (intersects) {
+	if (offset == SUPER_RESERVED &&
+	    length == min_alloc_size - SUPER_RESERVED) {
+	  // this is due to the change just after luminous to min_alloc_size
+	  // granularity allocations, and our baked in assumption at the top
+	  // of _fsck that 0~ROUND_UP_TO(SUPER_RESERVED,min_alloc_size) is used
+	  // (vs luminous's ROUND_UP_TO(SUPER_RESERVED,block_size)).  harmless,
+	  // since we will never allocate this region below min_alloc_size.
+	  dout(10) << __func__ << " ignoring free extent between SUPER_RESERVED"
+		   << " and min_alloc_size, 0x" << std::hex << offset << "~"
+		   << length << dendl;
+	} else {
+	  derr << "fsck error(fast): free extent 0x" << std::hex << offset
+	       << "~" << length << std::dec
+	       << " intersects allocated blocks" << dendl;
+	  ++errors;
+	}
+      }
+    }
+    fm_fast->enumerate_reset();
+    size_t count = used_blocks_fast.count();
+    if (used_blocks_fast.size() != count) {
+      assert(used_blocks_fast.size() > count);
+      ++errors;
+      used_blocks_fast.flip();
+      size_t start = used_blocks_fast.find_first();
+      while (start != decltype(used_blocks_fast)::npos) {
+	size_t cur = start;
+	while (true) {
+	  size_t next = used_blocks_fast.find_next(cur);
+	  if (next != cur + 1) {
+	    derr << "fsck error(fast): leaked extent 0x" << std::hex
+		 << ((uint64_t)start * fm_fast->get_alloc_size()) << "~"
+		 << ((cur + 1 - start) * fm_fast->get_alloc_size()) << std::dec
+		 << dendl;
+	    start = next;
+	    break;
+	  }
+	  cur = next;
+	}
+      }
+      used_blocks_fast.flip();
+    }
+  }
 
  out_scan:
   mempool_thread.shutdown();
   _flush_cache();
  out_alloc_fast:
-  if (!cct->_conf->bluestore_block_fast_create) {
+  if (!tier_exist) {
     goto out_alloc;
   }
   _close_alloc_fast();
@@ -7156,7 +7260,8 @@ int BlueStore::_verify_csum(OnodeRef& o,
 	bad,
 	blob->get_csum_chunk_size(),
 	[&](uint64_t offset, uint64_t length) {
-	  pex.emplace_back(bluestore_pextent_t(offset, length));
+	  pex.emplace_back(bluestore_pextent_t(offset, length,
+                             o->onode.has_hint_flag_fast()));
           return 0;
 	});
       derr << __func__ << " bad "
@@ -7171,7 +7276,9 @@ int BlueStore::_verify_csum(OnodeRef& o,
 	   << blob->get_csum_chunk_size() << std::dec
 	   << ", object " << o->oid
 	   << ", on fast " << o->onode.has_hint_flag_fast()
+           << ", blob(" << blob << "): " << *blob
            << dendl;
+      _dump_onode(o, 30);
     } else {
       derr << __func__ << " failed with exit code: " << cpp_strerror(r) << dendl;
     }
@@ -9911,7 +10018,7 @@ int BlueStore::_touch(TransContext *txc,
   return r;
 }
 
-void BlueStore::_dump_onode(const OnodeRef& o, int log_level)
+void BlueStore::_dump_onode(const OnodeRef& o, int log_level) const
 {
   if (!cct->_conf->subsys.should_gather(ceph_subsys_bluestore, log_level))
     return;
@@ -9923,6 +10030,7 @@ void BlueStore::_dump_onode(const OnodeRef& o, int log_level)
 		  << " expected_write_size " << o->onode.expected_write_size
                   << " has_hint_flag_inlined " << o->onode.has_hint_flag_inlined()
                   << " inline_valid " << o->onode.inline_valid
+                  << " has_hint_flag_fast " << o->onode.has_hint_flag_fast()
 		  << " in " << o->onode.extent_map_shards.size() << " shards"
 		  << ", " << o->extent_map.spanning_blob_map.size()
 		  << " spanning blobs"
@@ -9936,7 +10044,7 @@ void BlueStore::_dump_onode(const OnodeRef& o, int log_level)
   _dump_extent_map(o->extent_map, log_level);
 }
 
-void BlueStore::_dump_extent_map(ExtentMap &em, int log_level)
+void BlueStore::_dump_extent_map(ExtentMap &em, int log_level) const
 {
   uint64_t pos = 0;
   for (auto& s : em.shards) {
