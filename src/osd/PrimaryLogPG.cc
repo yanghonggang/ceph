@@ -13220,13 +13220,17 @@ bool PrimaryLogPG::agent_work(int start_max, int agent_flush_quota)
   // NOTE: do not flush the Sequencer.  we will assume that the
   // listing we get back is imprecise.
   vector<hobject_t> ls;
+  vector<bool> fast;
   hobject_t next;
-  // FIXME: only list objects in fast device
   int r = pgbackend->objects_list_partial(agent_state->position, ls_min, ls_max,
-					  &ls, &next);
+					  &ls, &next, &fast);
   assert(r >= 0);
-  //FIXME
   dout(1) << __func__ << " got " << ls.size() << " objects" << dendl;
+  map<hobject_t, bool> entries;
+  for (size_t i = 0; i < ls.size(); i++) {
+    entries[ls[i]] = fast[i];
+    dout(30) << "<" << ls[i] << ", " << fast[i] << ">" << dendl;
+  }
   int started = 0;
   for (vector<hobject_t>::iterator p = ls.begin();
        p != ls.end();
@@ -13284,11 +13288,9 @@ bool PrimaryLogPG::agent_work(int start_max, int agent_flush_quota)
     }
 
     if (agent_state->evict_mode != TierAgentState::EVICT_MODE_IDLE) {
-      if (pool.info.cache_mode != pg_pool_t::CACHEMODE_LOCAL)
-        agent_maybe_evict(obc, false);
-      else if (obc->obs.oi.is_on_tier())
-        agent_maybe_migrate(obc, false);
-
+      if (((pool.info.cache_mode != pg_pool_t::CACHEMODE_LOCAL) &&
+           agent_maybe_evict(obc, false)) ||
+          (entries[*p] && agent_maybe_migrate(obc, false)))
       ++started;
     } else if (agent_state->flush_mode != TierAgentState::FLUSH_MODE_IDLE &&
              agent_flush_quota > 0 && agent_maybe_flush(obc)) {
