@@ -13510,12 +13510,15 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
   object_info_t& oi = ctx->new_obs.oi;
 
   osd->agent_start_op(soid);
+  obc->start_block();
 
-  finish_ctx(ctx.get(), pg_log_entry_t::MODIFY);
   auto start = ceph_clock_now();
   ctx->register_on_success(
-    [this, soid, oi, promote, start]() {
+    [this, soid, oi, promote, start, obc]() {
+      obc->stop_block();
+      kick_object_context_blocked(obc);
       osd->agent_finish_op(soid);
+
       if (promote) {
         osd->promote_finish(oi.size);
         osd->logger->inc(l_osd_tier_promote);
@@ -13543,8 +13546,8 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
                     oi.alloc_hint_flags);
   ctx->delta_stats.num_wr++;
   ctx->delta_stats.num_rd++;
-  // apply the update
-  ctx->obc->obs = ctx->new_obs;
+  
+  finish_ctx(ctx.get(), pg_log_entry_t::MODIFY);
   simple_opc_submit(std::move(ctx));
  
   return true;
