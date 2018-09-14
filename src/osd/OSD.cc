@@ -3276,10 +3276,14 @@ void OSD::create_logger()
   osd_plb.add_u64_counter(l_osd_op_cache_miss, "op_cache_miss");
   osd_plb.add_u64_counter(l_osd_op_cache_read_hit, "op_cache_read_hit");
   osd_plb.add_u64_counter(l_osd_op_cache_write_hit, "op_cache_write_hit");
+  osd_plb.add_u64_counter(l_osd_op_cache_demote_dirty, "op_cache_demote_dirty");
+  osd_plb.add_u64_counter(l_osd_op_cache_demote_clean, "op_cache_demote_clean");
   osd_plb.add_time_avg(
     l_osd_tier_flush_lat, "osd_tier_flush_lat", "Object flush latency");
   osd_plb.add_time_avg(
     l_osd_tier_promote_lat, "osd_tier_promote_lat", "Object promote latency");
+  osd_plb.add_time_avg(
+    l_osd_tier_demote_lat, "osd_tier_demote_lat", "Object demote latency");
   osd_plb.add_time_avg(
     l_osd_tier_r_lat, "osd_tier_r_lat", "Object proxy read latency");
 

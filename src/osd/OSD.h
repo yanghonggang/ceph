@@ -177,8 +177,11 @@ enum {
   l_osd_op_cache_miss,
   l_osd_op_cache_read_hit,
   l_osd_op_cache_write_hit,
+  l_osd_op_cache_demote_dirty,
+  l_osd_op_cache_demote_clean,
   l_osd_tier_flush_lat,
   l_osd_tier_promote_lat,
+  l_osd_tier_demote_lat,
   l_osd_tier_r_lat,
 
   l_osd_pg_info,

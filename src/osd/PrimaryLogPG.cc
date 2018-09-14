@@ -13538,9 +13538,12 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
         osd->logger->inc(l_osd_tier_promote);
         osd->logger->tinc(l_osd_tier_promote_lat, ceph_clock_now() - start);
       } else {
+        if (oi.is_dirty())
+          osd->logger->inc(l_osd_op_cache_demote_dirty);
+        else
+          osd->logger->inc(l_osd_op_cache_demote_clean);
         osd->logger->inc(l_osd_tier_evict);
-        // FIXME: l_osd_tier_flush_lat => l_osd_tier_evict_lat
-        osd->logger->tinc(l_osd_tier_flush_lat, ceph_clock_now() - start);
+        osd->logger->tinc(l_osd_tier_demote_lat, ceph_clock_now() - start);
       }
     });
   PGTransaction *t = ctx->op_t.get();
