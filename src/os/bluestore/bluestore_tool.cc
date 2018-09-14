@@ -215,7 +215,7 @@ int main(int argc, char **argv)
     }
     if (devs.empty()) {
       cout << "infering bluefs devices from bluestore path" << std::endl;
-      for (auto fn : {"block", "block.wal", "block.db"}) {
+      for (auto fn : {"block", "block.wal", "block.db", "block.fast"}) {
 	string p = path + "/" + fn;
 	struct stat st;
 	if (::stat(p.c_str(), &st) == 0) {
