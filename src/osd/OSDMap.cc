@@ -4220,18 +4220,23 @@ protected:
 
     float reweight = qi.is_bucket() ? -1 : osdmap->get_weightf(qi.id);
     int64_t kb = 0, kb_used = 0, kb_avail = 0;
-    double util = 0;
-    if (get_bucket_utilization(qi.id, &kb, &kb_used, &kb_avail))
+    int64_t kb_fast = 0, kb_used_fast = 0, kb_avail_fast = 0;
+    double util = 0, util_fast = 0;
+    if (get_bucket_utilization(qi.id, &kb, &kb_used, &kb_avail,
+                               &kb_fast, &kb_used_fast, &kb_avail_fast)) {
       if (kb_used && kb)
         util = 100.0 * (double)kb_used / (double)kb;
-
+      if (kb_used_fast && kb_fast)
+        util_fast = 100.0 * (double)kb_used_fast / (double)kb_fast;
+    }
     double var = 1.0;
     if (average_util)
       var = util / average_util;
 
     size_t num_pgs = qi.is_bucket() ? 0 : pgs->get_num_pg_by_osd(qi.id);
 
-    dump_item(qi, reweight, kb, kb_used, kb_avail, util, var, num_pgs, f);
+    dump_item(qi, reweight, kb, kb_used, kb_avail, kb_fast, kb_used_fast,
+              kb_avail_fast, util, util_fast, var, num_pgs, f);
 
     if (!qi.is_bucket() && reweight > 0) {
       if (min_var < 0 || var < min_var)
@@ -4251,7 +4256,11 @@ protected:
 			 int64_t kb,
 			 int64_t kb_used,
 			 int64_t kb_avail,
+			 int64_t kb_fast,
+			 int64_t kb_used_fast,
+			 int64_t kb_avail_fast,
 			 double& util,
+			 double& util_fast,
 			 double& var,
 			 const size_t num_pgs,
 			 F *f) = 0;
@@ -4266,34 +4275,53 @@ protected:
       if (!osdmap->exists(i) || osdmap->get_weight(i) == 0)
 	continue;
       int64_t kb_i, kb_used_i, kb_avail_i;
-      if (get_osd_utilization(i, &kb_i, &kb_used_i, &kb_avail_i)) {
+      int64_t kb_i_fast, kb_used_i_fast, kb_avail_i_fast;
+      if (get_osd_utilization(i, &kb_i, &kb_used_i, &kb_avail_i,
+                              &kb_i_fast, &kb_used_i, &kb_avail_i_fast)) {
 	kb += kb_i;
 	kb_used += kb_used_i;
+        // silent compile warning
+        kb_i_fast = kb_i_fast;
+        kb_used_i_fast = kb_used_i_fast;
+        kb_avail_i_fast = kb_avail_i_fast;
       }
     }
     return kb > 0 ? 100.0 * (double)kb_used / (double)kb : 0;
   }
 
   bool get_osd_utilization(int id, int64_t* kb, int64_t* kb_used,
-			   int64_t* kb_avail) const {
+			   int64_t* kb_avail, int64_t* kb_fast,
+                           int64_t* kb_used_fast,
+                           int64_t* kb_avail_fast) const {
     const osd_stat_t *p = pgs->get_osd_stat(id);
     if (!p) return false;
     *kb = p->kb;
     *kb_used = p->kb_used;
     *kb_avail = p->kb_avail;
+
+    *kb_fast = p->kb_fast;
+    *kb_used_fast = p->kb_used_fast;
+    *kb_avail_fast = p->kb_avail_fast;
+
     return *kb > 0;
   }
 
   bool get_bucket_utilization(int id, int64_t* kb, int64_t* kb_used,
-			      int64_t* kb_avail) const {
+			      int64_t* kb_avail, int64_t* kb_fast,
+                              int64_t* kb_used_fast,
+                              int64_t* kb_avail_fast) const {
     if (id >= 0) {
       if (osdmap->is_out(id)) {
         *kb = 0;
         *kb_used = 0;
         *kb_avail = 0;
+        *kb_fast = 0;
+        *kb_used_fast = 0;
+        *kb_avail_fast = 0;
         return true;
       }
-      return get_osd_utilization(id, kb, kb_used, kb_avail);
+      return get_osd_utilization(id, kb, kb_used, kb_avail, kb_fast,
+                                 kb_used_fast, kb_avail_fast);
     }
 
     *kb = 0;
@@ -4303,11 +4331,17 @@ protected:
     for (int k = osdmap->crush->get_bucket_size(id) - 1; k >= 0; k--) {
       int item = osdmap->crush->get_bucket_item(id, k);
       int64_t kb_i = 0, kb_used_i = 0, kb_avail_i = 0;
-      if (!get_bucket_utilization(item, &kb_i, &kb_used_i, &kb_avail_i))
+      int64_t kb_i_fast = 0, kb_used_i_fast = 0, kb_avail_i_fast = 0;
+      if (!get_bucket_utilization(item, &kb_i, &kb_used_i, &kb_avail_i,
+                                  &kb_i_fast, &kb_used_i_fast,
+                                  &kb_avail_i_fast))
 	return false;
       *kb += kb_i;
       *kb_used += kb_used_i;
       *kb_avail += kb_avail_i;
+      *kb_fast += kb_i_fast;
+      *kb_used_fast += kb_used_i_fast;
+      *kb_avail_fast += kb_avail_i_fast;
     }
     return *kb > 0;
   }
@@ -4341,6 +4375,10 @@ public:
     tbl->define_column("USE", TextTable::LEFT, TextTable::RIGHT);
     tbl->define_column("AVAIL", TextTable::LEFT, TextTable::RIGHT);
     tbl->define_column("%USE", TextTable::LEFT, TextTable::RIGHT);
+    tbl->define_column("TSIZE", TextTable::LEFT, TextTable::RIGHT);
+    tbl->define_column("TUSE", TextTable::LEFT, TextTable::RIGHT);
+    tbl->define_column("TAVAIL", TextTable::LEFT, TextTable::RIGHT);
+    tbl->define_column("%TUSE", TextTable::LEFT, TextTable::RIGHT);
     tbl->define_column("VAR", TextTable::LEFT, TextTable::RIGHT);
     tbl->define_column("PGS", TextTable::LEFT, TextTable::RIGHT);
     if (tree)
@@ -4358,6 +4396,14 @@ public:
 	 << si_t(pgs->get_osd_sum().kb_avail << 10)
 	 << lowprecision_t(average_util)
 	 << ""
+	 << TextTable::endrow
+	 << ""
+	 << ""
+         << "" << "TIER TOTAL"
+	 << si_t(pgs->get_osd_sum().kb_fast << 10)
+	 << si_t(pgs->get_osd_sum().kb_used_fast << 10)
+	 << si_t(pgs->get_osd_sum().kb_avail_fast << 10)
+	 << ""
 	 << TextTable::endrow;
   }
 
@@ -4374,7 +4420,11 @@ protected:
 			 int64_t kb,
 			 int64_t kb_used,
 			 int64_t kb_avail,
+			 int64_t kb_fast,
+			 int64_t kb_used_fast,
+			 int64_t kb_avail_fast,
 			 double& util,
+			 double& util_fast,
 			 double& var,
 			 const size_t num_pgs,
 			 TextTable *tbl) override {
@@ -4389,6 +4439,10 @@ protected:
 	 << si_t(kb_used << 10)
 	 << si_t(kb_avail << 10)
 	 << lowprecision_t(util)
+	 << si_t(kb_fast << 10)
+	 << si_t(kb_used_fast << 10)
+	 << si_t(kb_avail_fast << 10)
+	 << lowprecision_t(util_fast)
 	 << lowprecision_t(var);
 
     if (qi.is_bucket()) {
@@ -4462,7 +4516,11 @@ protected:
 			 int64_t kb,
 			 int64_t kb_used,
 			 int64_t kb_avail,
+			 int64_t kb_fast,
+			 int64_t kb_used_fast,
+			 int64_t kb_avail_fast,
 			 double& util,
+			 double& util_fast,
 			 double& var,
 			 const size_t num_pgs,
 			 Formatter *f) override {
@@ -4473,6 +4531,10 @@ protected:
     f->dump_int("kb_used", kb_used);
     f->dump_int("kb_avail", kb_avail);
     f->dump_float("utilization", util);
+    f->dump_int("kb_tier", kb_fast);
+    f->dump_int("kb_used_tier", kb_used_fast);
+    f->dump_int("kb_avail_tier", kb_avail_fast);
+    f->dump_float("utilization_tier", util_fast);
     f->dump_float("var", var);
     f->dump_unsigned("pgs", num_pgs);
     CrushTreeDumper::dump_bucket_children(crush, qi, f);
