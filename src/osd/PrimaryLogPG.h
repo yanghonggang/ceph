@@ -1172,7 +1172,8 @@ protected:
    */
   bool maybe_promote(ObjectContextRef obc,
                      bool in_hit_set,
-                     uint32_t recency);
+                     uint32_t recency,
+                     bool may_write);
 
   /**
    * This helper function checks if a promotion is needed.

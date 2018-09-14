@@ -2230,7 +2230,7 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
     uint32_t recency = op->may_write() ? 
                          pool.info.min_write_recency_for_promote :
                          pool.info.min_read_recency_for_promote; 
-    maybe_promote(obc, in_hit_set, recency);
+    maybe_promote(obc, in_hit_set, recency, op->may_write());
   }
 
   if (maybe_handle_cache(op,
@@ -2702,13 +2702,26 @@ PrimaryLogPG::cache_result_t PrimaryLogPG::maybe_handle_cache_detail(
 
 bool PrimaryLogPG::maybe_promote(ObjectContextRef obc,
                                  bool in_hit_set,
-                                 uint32_t recency)
+                                 uint32_t recency,
+                                 bool may_write)
 {
   dout(1) << __func__
           << " " << obc->obs.oi
           << ", in_hit_set " << in_hit_set
           << ", recency " << recency
           << dendl;
+  if (obc->obs.oi.is_on_tier()) {
+    osd->logger->inc(l_osd_op_cache_hit);
+    if (may_write)
+      osd->logger->inc(l_osd_op_cache_write_hit);
+    else
+      osd->logger->inc(l_osd_op_cache_read_hit);
+
+    return false;
+  }
+  
+  osd->logger->inc(l_osd_op_cache_miss);
+
   switch (recency) {
   case 0:
     break;
