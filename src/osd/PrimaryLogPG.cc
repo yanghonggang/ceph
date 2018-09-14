@@ -2765,7 +2765,7 @@ bool PrimaryLogPG::maybe_promote(ObjectContextRef obc,
     dout(1) << __func__ << " promote throttled" << dendl;
     return false;
   }
-  return agent_maybe_migrate(obc, true);
+  return agent_maybe_migrate(obc, true, may_write);
 }
 
 bool PrimaryLogPG::maybe_promote(ObjectContextRef obc,
@@ -13413,7 +13413,8 @@ void PrimaryLogPG::agent_load_hit_sets()
   }
 }
 
-bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
+bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote,
+                                       bool read_promote)
 {
   // skip any migration
   if (cct->_conf->osd_agent_skip_migrate)
@@ -13528,13 +13529,18 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
 
   auto start = ceph_clock_now();
   ctx->register_on_success(
-    [this, soid, oi, promote, start, obc]() {
+    [this, soid, oi, promote, read_promote, start, obc]() {
       obc->stop_block();
       kick_object_context_blocked(obc);
       osd->agent_finish_op(soid);
 
       if (promote) {
         osd->promote_finish(oi.size);
+        if (read_promote)
+          osd->logger->inc(l_osd_tier_read_promote);
+        else
+          osd->logger->inc(l_osd_tier_write_promote);
+
         osd->logger->inc(l_osd_tier_promote);
         osd->logger->tinc(l_osd_tier_promote_lat, ceph_clock_now() - start);
       } else {
@@ -13542,6 +13548,7 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
           osd->logger->inc(l_osd_op_cache_demote_dirty);
         else
           osd->logger->inc(l_osd_op_cache_demote_clean);
+
         osd->logger->inc(l_osd_tier_evict);
         osd->logger->tinc(l_osd_tier_demote_lat, ceph_clock_now() - start);
       }

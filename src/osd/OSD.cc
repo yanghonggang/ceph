@@ -3235,6 +3235,10 @@ void OSD::create_logger()
     l_osd_copyfrom, "copyfrom", "Rados \"copy-from\" operations");
 
   osd_plb.add_u64_counter(l_osd_tier_promote, "tier_promote", "Tier promotions");
+  osd_plb.add_u64_counter(l_osd_tier_read_promote, "tier_read_promote",
+                          "Tier read promotions");
+  osd_plb.add_u64_counter(l_osd_tier_write_promote, "tier_write_promote",
+                          "Tier write promotions");
   osd_plb.add_u64_counter(l_osd_tier_flush, "tier_flush", "Tier flushes");
   osd_plb.add_u64_counter(
     l_osd_tier_flush_fail, "tier_flush_fail", "Failed tier flushes");
