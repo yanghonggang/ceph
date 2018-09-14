@@ -13434,8 +13434,9 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote)
     osd->logger->inc(l_osd_agent_skip);
     return false;
   }
-  if (obc->obs.oi.is_cache_pinned()) {
-    dout(1) << __func__ << " skip (cache_pinned) " << obc->obs.oi << dendl;
+  if (obc->obs.oi.is_cache_pinned() && !promote) {
+    dout(1) << __func__ << " skip (cache_pinned) " << obc->obs.oi
+            << ", promote " << promote << dendl;
     osd->logger->inc(l_osd_agent_skip);
     return false;
   }
