@@ -932,15 +932,23 @@ void OSDService::set_injectfull(s_names type, int64_t count)
 
 osd_stat_t OSDService::set_osd_stat(const struct store_statfs_t &stbuf,
                                     vector<int>& hb_peers,
-				    int num_pgs)
+				    int num_pgs,
+                                    const struct store_statfs_t &stbuf_fast)
 {
   uint64_t bytes = stbuf.total;
   uint64_t used = bytes - stbuf.available;
   uint64_t avail = stbuf.available;
+  uint64_t bytes_fast = stbuf_fast.total;
+  uint64_t used_fast = bytes_fast - stbuf_fast.available;
+  uint64_t avail_fast = stbuf_fast.available;
 
   osd->logger->set(l_osd_stat_bytes, bytes);
   osd->logger->set(l_osd_stat_bytes_used, used);
   osd->logger->set(l_osd_stat_bytes_avail, avail);
+
+  osd->logger->set(l_osd_stat_bytes_fast, bytes_fast);
+  osd->logger->set(l_osd_stat_bytes_used_fast, used_fast);
+  osd->logger->set(l_osd_stat_bytes_avail_fast, avail_fast);
 
   {
     Mutex::Locker l(stat_lock);
@@ -949,6 +957,11 @@ osd_stat_t OSDService::set_osd_stat(const struct store_statfs_t &stbuf,
     osd_stat.kb = bytes >> 10;
     osd_stat.kb_used = used >> 10;
     osd_stat.kb_avail = avail >> 10;
+
+    osd_stat.kb_fast = bytes_fast >> 10;
+    osd_stat.kb_used_fast = used_fast >> 10;
+    osd_stat.kb_avail_fast = avail_fast >> 10;
+
     osd_stat.num_pgs = num_pgs;
     return osd_stat;
   }
@@ -967,7 +980,7 @@ void OSDService::update_osd_stat(vector<int>& hb_peers)
   dout(1) << __func__ << " fast: total " << stbuf_fast.total
           << ", available " << stbuf_fast.available
           << dendl;
-  auto new_stat = set_osd_stat(stbuf, hb_peers, osd->get_num_pgs());
+  auto new_stat = set_osd_stat(stbuf, hb_peers, osd->get_num_pgs(), stbuf_fast);
   dout(20) << "update_osd_stat " << new_stat << dendl;
   assert(new_stat.kb);
   float ratio = ((float)new_stat.kb_used) / ((float)new_stat.kb);
@@ -3207,6 +3220,16 @@ void OSD::create_logger()
     l_osd_stat_bytes_used, "stat_bytes_used", "Used space", "used",
     PerfCountersBuilder::PRIO_USEFUL);
   osd_plb.add_u64(l_osd_stat_bytes_avail, "stat_bytes_avail", "Available space");
+
+  osd_plb.add_u64(
+    l_osd_stat_bytes_fast, "stat_bytes_fast", "OSD fast dev size", "size",
+    PerfCountersBuilder::PRIO_USEFUL);
+  osd_plb.add_u64(
+    l_osd_stat_bytes_used_fast, "stat_bytes_used_fast", "Used fast dev space",
+    "used",
+    PerfCountersBuilder::PRIO_USEFUL);
+  osd_plb.add_u64(l_osd_stat_bytes_avail_fast, "stat_bytes_avail_fast",
+                  "Available fast dev space");
 
   osd_plb.add_u64_counter(
     l_osd_copyfrom, "copyfrom", "Rados \"copy-from\" operations");

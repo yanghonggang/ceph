@@ -896,6 +896,7 @@ WRITE_CLASS_ENCODER(objectstore_perf_stat_t)
  */
 struct osd_stat_t {
   int64_t kb, kb_used, kb_avail;
+  int64_t kb_fast, kb_used_fast, kb_avail_fast;
   vector<int> hb_peers;
   int32_t snap_trim_queue_len, num_snap_trimming;
 
@@ -909,12 +910,16 @@ struct osd_stat_t {
   uint32_t num_pgs = 0;
 
   osd_stat_t() : kb(0), kb_used(0), kb_avail(0),
+                 kb_fast(0), kb_used_fast(0), kb_avail_fast(0),
 		 snap_trim_queue_len(0), num_snap_trimming(0) {}
 
   void add(const osd_stat_t& o) {
     kb += o.kb;
     kb_used += o.kb_used;
     kb_avail += o.kb_avail;
+    kb_fast += o.kb_fast;
+    kb_used_fast += o.kb_used_fast;
+    kb_avail_fast += o.kb_avail_fast;
     snap_trim_queue_len += o.snap_trim_queue_len;
     num_snap_trimming += o.num_snap_trimming;
     op_queue_age_hist.add(o.op_queue_age_hist);
@@ -925,6 +930,9 @@ struct osd_stat_t {
     kb -= o.kb;
     kb_used -= o.kb_used;
     kb_avail -= o.kb_avail;
+    kb_fast -= o.kb_fast;
+    kb_used_fast -= o.kb_used_fast;
+    kb_avail_fast -= o.kb_avail_fast;
     snap_trim_queue_len -= o.snap_trim_queue_len;
     num_snap_trimming -= o.num_snap_trimming;
     op_queue_age_hist.sub(o.op_queue_age_hist);

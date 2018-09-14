@@ -146,6 +146,10 @@ enum {
   l_osd_stat_bytes_used,
   l_osd_stat_bytes_avail,
 
+  l_osd_stat_bytes_fast,
+  l_osd_stat_bytes_used_fast,
+  l_osd_stat_bytes_avail_fast,
+
   l_osd_copyfrom,
 
   l_osd_tier_promote,
@@ -1060,7 +1064,8 @@ public:
   void update_osd_stat(vector<int>& hb_peers);
   osd_stat_t set_osd_stat(const struct store_statfs_t &stbuf,
                           vector<int>& hb_peers,
-			  int num_pgs);
+			  int num_pgs,
+                          const struct store_statfs_t &stbuf_fast);
   osd_stat_t get_osd_stat() {
     Mutex::Locker l(stat_lock);
     ++seq;

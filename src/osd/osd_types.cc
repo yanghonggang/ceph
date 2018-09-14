@@ -313,6 +313,9 @@ void osd_stat_t::dump(Formatter *f) const
   f->dump_unsigned("kb", kb);
   f->dump_unsigned("kb_used", kb_used);
   f->dump_unsigned("kb_avail", kb_avail);
+  f->dump_unsigned("kb_fast", kb_fast);
+  f->dump_unsigned("kb_used_fast", kb_used_fast);
+  f->dump_unsigned("kb_avail_fast", kb_avail_fast);
   f->open_array_section("hb_peers");
   for (auto p : hb_peers)
     f->dump_int("osd", p);
@@ -329,7 +332,7 @@ void osd_stat_t::dump(Formatter *f) const
 
 void osd_stat_t::encode(bufferlist &bl) const
 {
-  ENCODE_START(7, 2, bl);
+  ENCODE_START(8, 2, bl);
   ::encode(kb, bl);
   ::encode(kb_used, bl);
   ::encode(kb_avail, bl);
@@ -342,6 +345,10 @@ void osd_stat_t::encode(bufferlist &bl) const
   ::encode(up_from, bl);
   ::encode(seq, bl);
   ::encode(num_pgs, bl);
+
+  ::encode(kb_fast, bl);
+  ::encode(kb_used_fast, bl);
+  ::encode(kb_avail_fast, bl);
   ENCODE_FINISH(bl);
 }
 
@@ -367,6 +374,11 @@ void osd_stat_t::decode(bufferlist::iterator &bl)
   if (struct_v >= 7) {
     ::decode(num_pgs, bl);
   }
+  if (struct_v >= 8) {
+    ::decode(kb_fast, bl);
+    ::decode(kb_used_fast, bl);
+    ::decode(kb_avail_fast, bl);
+  }
   DECODE_FINISH(bl);
 }
 
@@ -378,6 +390,9 @@ void osd_stat_t::generate_test_instances(std::list<osd_stat_t*>& o)
   o.back()->kb = 1;
   o.back()->kb_used = 2;
   o.back()->kb_avail = 3;
+  o.back()->kb_fast = 0;
+  o.back()->kb_used_fast = 0;
+  o.back()->kb_avail_fast = 1;
   o.back()->hb_peers.push_back(7);
   o.back()->snap_trim_queue_len = 8;
   o.back()->num_snap_trimming = 99;

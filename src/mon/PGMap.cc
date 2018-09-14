@@ -164,23 +164,31 @@ void PGMapDigest::print_summary(Formatter *f, ostream *out) const
     f->dump_unsigned("num_pgs", num_pg);
     f->dump_unsigned("num_pools", pg_pool_sum.size());
     f->dump_unsigned("num_objects", pg_sum.stats.sum.num_objects);
-    f->dump_unsigned("num_objects_fast", pg_sum.stats.sum.num_objects_fast);
+    f->dump_unsigned("num_objects_tier", pg_sum.stats.sum.num_objects_fast);
     f->dump_unsigned("data_bytes", pg_sum.stats.sum.num_bytes);
-    f->dump_unsigned("data_bytes_fast", pg_sum.stats.sum.num_bytes_fast);
+    f->dump_unsigned("data_bytes_tier", pg_sum.stats.sum.num_bytes_fast);
     f->dump_unsigned("bytes_used", osd_sum.kb_used * 1024ull);
     f->dump_unsigned("bytes_avail", osd_sum.kb_avail * 1024ull);
     f->dump_unsigned("bytes_total", osd_sum.kb * 1024ull);
+
+    f->dump_unsigned("bytes_used_tier", osd_sum.kb_used_fast * 1024ull);
+    f->dump_unsigned("bytes_avail_tier", osd_sum.kb_avail_fast * 1024ull);
+    f->dump_unsigned("bytes_total_tier", osd_sum.kb_fast * 1024ull);
   } else {
     *out << "    pools:   " << pg_pool_sum.size() << " pools, "
          << num_pg << " pgs\n";
     *out << "    objects: " << si_t(pg_sum.stats.sum.num_objects) << " objects, "
          << prettybyte_t(pg_sum.stats.sum.num_bytes) << "\n";
-    *out << "    fast objects: " << si_t(pg_sum.stats.sum.num_objects_fast) << " objects, "
+    *out << "    tier objects: " << si_t(pg_sum.stats.sum.num_objects_fast) << " objects, "
          << prettybyte_t(pg_sum.stats.sum.num_bytes_fast) << "\n";
     *out << "    usage:   "
          << kb_t(osd_sum.kb_used) << " used, "
          << kb_t(osd_sum.kb_avail) << " / "
          << kb_t(osd_sum.kb) << " avail\n";
+    *out << "    tier usage:   "
+         << kb_t(osd_sum.kb_used_fast) << " used, "
+         << kb_t(osd_sum.kb_avail_fast) << " / "
+         << kb_t(osd_sum.kb_fast) << " avail\n";
     *out << "    pgs:     ";
   }
 
