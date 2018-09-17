@@ -11097,13 +11097,16 @@ bool OSDMonitor::prepare_command_impl(MonOpRequestRef op,
       err = -EINVAL;
       goto reply;
     }
-    
-    bool skip_tier_check = false;
-    if (mode == pg_pool_t::CACHEMODE_LOCAL)
-      skip_tier_check = true;
 
     const pg_pool_t *p = osdmap.get_pg_pool(pool_id);
     assert(p);
+   
+    bool skip_tier_check = false;
+    if (mode == pg_pool_t::CACHEMODE_LOCAL ||
+       (p->cache_mode == pg_pool_t::CACHEMODE_LOCAL &&
+        mode == pg_pool_t::CACHEMODE_NONE))
+      skip_tier_check = true;
+
     if (!skip_tier_check && !p->is_tier()) {
       ss << "pool '" << poolstr << "' is not a tier";
       err = -EINVAL;
@@ -11220,7 +11223,7 @@ bool OSDMonitor::prepare_command_impl(MonOpRequestRef op,
     np->flags |= pg_pool_t::FLAG_INCOMPLETE_CLONES;
     ss << "set cache-mode for pool '" << poolstr
 	<< "' to " << pg_pool_t::get_cache_mode_name(mode);
-    if (mode == pg_pool_t::CACHEMODE_NONE) {
+    if (mode == pg_pool_t::CACHEMODE_NONE && !skip_tier_check) {
       const pg_pool_t *base_pool = osdmap.get_pg_pool(np->tier_of);
       assert(base_pool);
       if (base_pool->read_tier == pool_id ||
