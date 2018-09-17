@@ -5893,8 +5893,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       ++ctx->num_write;
       {
 	tracepoint(osd, do_osd_op_pre_setallochint, soid.oid.name.c_str(), soid.snap.val, op.alloc_hint.expected_object_size, op.alloc_hint.expected_write_size);
+        bool migration_hint = false;
         if (obs.exists && ((oi.alloc_hint_flags ^ op.alloc_hint.flags) &
             CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER)) {
+          migration_hint = true;
           // migrate from fast dev to slow dev
           if (oi.alloc_hint_flags & CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER) {
             ctx->delta_stats.num_bytes_fast -= oi.size;
@@ -5907,8 +5909,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
         // Note: set alloc_hint_flag before call maybe_create_new_object()
         //       so we can know whether this is a object should be stored
         //       on fast device
-	oi.expected_object_size = op.alloc_hint.expected_object_size;
-	oi.expected_write_size = op.alloc_hint.expected_write_size;
+        if (!migration_hint) {
+	  oi.expected_object_size = op.alloc_hint.expected_object_size;
+ 	  oi.expected_write_size = op.alloc_hint.expected_write_size;
+        }
 	oi.alloc_hint_flags = op.alloc_hint.flags;
 	maybe_create_new_object(ctx);
         t->set_alloc_hint(soid, op.alloc_hint.expected_object_size,

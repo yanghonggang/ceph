@@ -158,6 +158,7 @@ void usage(ostream& out)
 "   cache-evict <obj-name>           evict cache pool object\n"
 "   cache-flush-evict-all            flush+evict all objects\n"
 "   cache-try-flush-evict-all        try-flush+evict all objects\n"
+"   cache-demote-all                 demote all objects from tier to base dev\n"
 "\n"
 "GLOBAL OPTIONS:\n"
 "   --object_locator object_locator\n"
@@ -1213,6 +1214,12 @@ static int do_cache_try_flush(IoCtx& io_ctx, string oid)
   return r;
 }
 
+static int do_migrate(IoCtx& io_ctx, string oid, bool promote)
+{
+  return io_ctx.set_alloc_hint2(oid, 0, 0, (promote ?
+                                ALLOC_HINT_FLAG_FAST_TIER : 0));
+}
+
 static int do_cache_evict(IoCtx& io_ctx, string oid)
 {
   ObjectReadOperation op;
@@ -1228,6 +1235,62 @@ static int do_cache_evict(IoCtx& io_ctx, string oid)
   int r = completion->get_return_value();
   completion->release();
   return r;
+}
+
+static int do_cache_demote_all(IoCtx& io_ctx)
+{
+  int errors = 0;
+  io_ctx.set_namespace(all_nspaces);
+  try {
+    librados::NObjectIterator i = io_ctx.nobjects_begin();
+    librados::NObjectIterator i_end = io_ctx.nobjects_end();
+    for (; i != i_end; i++) {
+      int r;
+      cout << i->get_nspace() << "\t" << i->get_oid() << "\t" << i->get_locator() << std::endl;
+      if (i->get_locator().size()) {
+        io_ctx.locator_set_key(i->get_locator());
+      } else {
+        io_ctx.locator_set_key(string());
+      }
+      io_ctx.set_namespace(i->get_nspace());
+      snap_set_t ls;
+      io_ctx.snap_set_read(LIBRADOS_SNAP_DIR);
+      r = io_ctx.list_snaps(i->get_oid(), &ls);
+      if (r < 0) {
+        cerr << "error listing snap shots " << i->get_nspace() << "/" << i->get_oid() << ": "
+             << cpp_strerror(r) << std::endl;
+        errors ++;
+        continue;
+      }
+      std::vector<clone_info_t>::iterator ci = ls.clones.begin();
+      // no snapshots
+      if (ci == ls.clones.end()) {
+        r = do_migrate(io_ctx, i->get_oid(), false);
+        if (r < 0) {
+          cerr << "failed to demote " << i->get_nspace() << "/" << i->get_oid() << ": "
+               << cpp_strerror(r) << std::endl;
+          errors ++;
+          continue;
+        } 
+      } else {
+        for (std::vector<clone_info_t>::iterator ci = ls.clones.begin();
+             ci != ls.clones.end(); ci++) {
+          io_ctx.snap_set_read(ci->cloneid);
+          r = do_migrate(io_ctx, i->get_oid(), false);
+          if (r < 0) {
+            cerr << "failed to demote " << i->get_nspace() << "/" << i->get_oid() << ": "
+                 << cpp_strerror(r) << std::endl;
+            errors ++;
+            break;
+          }
+        }
+      }
+    }
+  } catch (const std::runtime_error& e) {
+    cerr << e.what() << std::endl;
+    return -1;
+  }
+  return errors ? -1 : 0;
 }
 
 static int do_cache_flush_evict_all(IoCtx& io_ctx, bool blocking)
@@ -3532,6 +3595,15 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
              << cpp_strerror(ret) << std::endl;
         goto out;
       }
+    }
+  } else if (strcmp(nargs[0], "cache-demote-all") == 0) {
+    if (!pool_name)
+      usage_exit();
+    ret = do_cache_demote_all(io_ctx);
+    if (ret < 0) {
+      cerr << "err from do_cache_demote_all: "
+           << cpp_strerror(ret) << std::endl;
+      goto out;
     }
   } else if (strcmp(nargs[0], "cache-flush-evict-all") == 0) {
     if (!pool_name)
