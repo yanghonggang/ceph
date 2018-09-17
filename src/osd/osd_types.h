@@ -1338,6 +1338,7 @@ public:
   cache_mode_t cache_mode;  ///< cache pool mode
 
   bool is_tier() const { return tier_of >= 0; }
+  bool in_local_mode() const { return cache_mode == CACHEMODE_LOCAL; }
   bool has_tiers() const { return !tiers.empty(); }
   void clear_tier() {
     tier_of = -1;

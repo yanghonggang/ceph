@@ -11230,6 +11230,11 @@ bool OSDMonitor::prepare_command_impl(MonOpRequestRef op,
 	  base_pool->write_tier == pool_id)
 	ss <<" (WARNING: pool is still configured as read or write tier)";
     }
+    // when change tier mode from local to none, hitset will also be cleared
+    if (mode == pg_pool_t::CACHEMODE_NONE &&
+        p->cache_mode == pg_pool_t::CACHEMODE_LOCAL)
+      np->clear_tier();
+
     wait_for_finished_proposal(op, new Monitor::C_Command(mon, op, 0, ss.str(),
 					      get_last_committed() + 1));
     return true;
