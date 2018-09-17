@@ -6300,21 +6300,19 @@ int OSDMonitor::prepare_command_pool_set(map<string,cmd_vartype> &cmdmap,
     f = strict_strtod(val.c_str(), &floaterr);
     uf = llrintl(f * (double)1000000.0);
   }
-#if 0
-  if (/*!p.is_tier() &&*/
-      (/*var == "hit_set_type" || var == "hit_set_period" ||
-       var == "hit_set_count" || var == "hit_set_fpp" ||*/
+  if ((!p.is_tier() && !p.in_local_mode()) &&
+      (var == "hit_set_type" || var == "hit_set_period" ||
+       var == "hit_set_count" || var == "hit_set_fpp" ||
        var == "target_max_objects" || var == "target_max_bytes" ||
        var == "cache_target_full_ratio" || var == "cache_target_dirty_ratio" ||
        var == "cache_target_dirty_high_ratio" || var == "use_gmt_hitset" ||
-       var == "cache_min_flush_age" || var == "cache_min_evict_age" /*||
+       var == "cache_min_flush_age" || var == "cache_min_evict_age" ||
        var == "hit_set_grade_decay_rate" || var == "hit_set_search_last_n" ||
        var == "min_read_recency_for_promote" ||
        var == "min_write_recency_for_promote" ||
-       var == "cache_local_mode_default_fast"*/)) {
+       var == "cache_local_mode_default_fast")) {
     return -EACCES;
   }
-#endif
 
   if (var == "size") {
     if (p.has_flag(pg_pool_t::FLAG_NOSIZECHANGE)) {
