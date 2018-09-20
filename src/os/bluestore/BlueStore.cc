@@ -3515,6 +3515,20 @@ void BlueStore::handle_discard(interval_set<uint64_t>& to_release)
   alloc->release(to_release);
 }
 
+static void discard_cb_fast(void *priv, void *priv2)
+{
+  BlueStore *store = static_cast<BlueStore*>(priv);
+  interval_set<uint64_t> *tmp = static_cast<interval_set<uint64_t>*>(priv2);
+  store->handle_discard_fast(*tmp);
+}
+
+void BlueStore::handle_discard_fast(interval_set<uint64_t>& to_release)
+{
+  dout(10) << __func__ << dendl;
+  assert(alloc_fast);
+  alloc_fast->release(to_release);
+}
+
 BlueStore::BlueStore(CephContext *cct, const string& path)
   : ObjectStore(cct, path),
     throttle_bytes(cct, "bluestore_throttle_bytes",
@@ -4399,7 +4413,8 @@ int BlueStore::_open_bdev_fast(bool create)
 {
   assert(bdev_fast == NULL);
   string p = path + "/block.fast";
-  bdev_fast = BlockDevice::create(cct, p, aio_cb, static_cast<void*>(this));
+  bdev_fast = BlockDevice::create(cct, p, aio_cb, static_cast<void*>(this),
+                                  discard_cb_fast, static_cast<void*>(this));
   int r = bdev_fast->open(p);
   if (r < 0)
     goto fail;
@@ -8821,18 +8836,31 @@ out:
   // interval_set<uint64_t> bulk_release_extents_fast;
   // it's expected we're called with lazy_release_lock already taken!
   if (!cct->_conf->bluestore_debug_no_reuse_blocks) {
+    int r = 0;
+    if (cct->_conf->bdev_enable_discard && cct->_conf->bdev_async_discard) {
+      r = bdev_fast->queue_discard(txc->released_fast);
+      if (r == 0) {
+        dout(10) << __func__ << "(queued/fast) " << txc << " " << std::hex
+                 << txc->released_fast << std::dec << dendl;
+        goto out2;
+      }
+    } else if (cct->_conf->bdev_enable_discard) {
+      for (auto p = txc->released_fast.begin();
+           p != txc->released_fast.end(); ++p) {
+        bdev_fast->discard(p.get_start(), p.get_len());
+      }
+    }
     dout(10) << __func__ << " (fast) " << txc << " " << std::hex
              << txc->released_fast << std::dec << dendl;
+
     // interval_set seems to be too costly for inserting things in
     // bstore_kv_final. We could serialize in simpler format and perform
     // the merge separately, maybe even in a dedicated thread.
     // bulk_release_extents_fast.insert(txc->released_fast);
-    for (interval_set<uint64_t>::iterator p = txc->released_fast.begin();
-         p != txc->released_fast.end(); ++p) {
-      alloc_fast->release(p.get_start(), p.get_len());
-    }
+    alloc_fast->release(txc->released_fast);
   }
 
+out2:
   // alloc_fast->release(bulk_release_extents_fast);
   txc->allocated_fast.clear();
   txc->released_fast.clear();

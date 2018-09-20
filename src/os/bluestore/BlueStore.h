@@ -137,6 +137,9 @@ public:
   //handler for discard event
   void handle_discard(interval_set<uint64_t>& to_release);
 
+  //handler for discard event
+  void handle_discard_fast(interval_set<uint64_t>& to_release);
+
   void _set_csum();
   void _set_compression();
   void _set_throttle_params();
