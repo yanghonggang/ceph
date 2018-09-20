@@ -6937,7 +6937,8 @@ int BlueStore::_do_read(
 
   dout(20) << __func__ << " 0x" << std::hex << offset << "~" << length
            << " size 0x" << o->onode.size << " (" << std::dec
-           << o->onode.size << ")" << dendl;
+           << o->onode.size << ")"
+           << ", " << o->oid << dendl;
   bl.clear();
   _dump_onode(o);
 
@@ -7009,10 +7010,12 @@ int BlueStore::_do_read(
     interval_set<uint32_t> cache_interval;
     bptr->shared_blob->bc.read(
       bptr->shared_blob->get_cache(), b_off, b_len, cache_res, cache_interval);
-    dout(20) << __func__ << "  blob " << *bptr << std::hex
+    dout(1) << __func__ << "  blob " << *bptr << std::hex
 	     << " need 0x" << b_off << "~" << b_len
 	     << " cache has 0x" << cache_interval
-	     << std::dec << dendl;
+	     << std::dec
+             << ", " << o->oid
+             << ", le " << *lp << dendl;
 
     auto pc = cache_res.begin();
     while (b_len > 0) {
@@ -7021,8 +7024,9 @@ int BlueStore::_do_read(
 	  pc->first == b_off) {
 	l = pc->second.length();
 	ready_regions[pos].claim(pc->second);
-	dout(30) << __func__ << "    use cache 0x" << std::hex << pos << ": 0x"
-		 << b_off << "~" << l << std::dec << dendl;
+	dout(1) << __func__ << "    use cache 0x" << std::hex << pos << ": 0x"
+		 << b_off << "~" << l << std::dec
+                 << ", " << o->oid << dendl;
 	++pc;
       } else {
 	l = b_len;
@@ -7030,8 +7034,10 @@ int BlueStore::_do_read(
 	  assert(pc->first > b_off);
 	  l = pc->first - b_off;
 	}
-	dout(30) << __func__ << "    will read 0x" << std::hex << pos << ": 0x"
-		 << b_off << "~" << l << std::dec << dendl;
+	dout(1) << __func__ << "    will read 0x" << std::hex << pos << ": 0x"
+		 << b_off << "~" << l << std::dec
+                 << ", " << o->oid
+                 << ", blob " << bptr << dendl;
 	blobs2read[bptr].emplace_back(region_t(pos, b_off, l));
 	++num_regions;
       }
@@ -7051,7 +7057,7 @@ int BlueStore::_do_read(
   IOContext ioc(cct, NULL, true); // allow EIO
   for (auto& p : blobs2read) {
     const BlobRef& bptr = p.first;
-    dout(20) << __func__ << "  blob " << *bptr << std::hex
+    dout(1) << __func__ << "  blob " << *bptr << std::hex
 	     << " need " << p.second << std::dec << dendl;
     if (bptr->get_blob().is_compressed()) {
       // read the whole thing
@@ -7099,10 +7105,11 @@ int BlueStore::_do_read(
 	if (tail) {
 	  r_len += chunk_size - tail;
 	}
-	dout(20) << __func__ << "    region 0x" << std::hex
+	dout(1) << __func__ << "    region 0x" << std::hex
 		 << reg.logical_offset
 		 << ": 0x" << reg.blob_xoffset << "~" << reg.length
 		 << " reading 0x" << reg.r_off << "~" << r_len << std::dec
+                 << ", " << o->oid
 		 << dendl;
 
 	// read it
@@ -7111,6 +7118,11 @@ int BlueStore::_do_read(
 	  [&](uint64_t offset, uint64_t length) {
 	    int r;
 	    // use aio if there is more than one region to read
+	    dout(1) << __func__ << ", dev " << (bdev_target == bdev)
+                    << std::hex << ", [0x" << offset << "~0x" << length << "]"
+                    << ", aio_read " << (num_regions > 1)
+                    << ", blob " << bptr
+                    << dendl;
 	    if (num_regions > 1) {
 	      r = bdev_target->aio_read(offset, length, &reg.bl, &ioc);
 	    } else {
@@ -9044,6 +9056,10 @@ void BlueStore::_kv_sync_thread()
       } else
 	force_flush = true;
 
+      // always flush fast dev
+      if (bdev_fast)
+        bdev_fast->flush();
+
       if (force_flush) {
 	dout(20) << __func__ << " num_aios=" << aios
 		 << " force_flush=" << (int)force_flush
@@ -9638,8 +9654,15 @@ int BlueStore::queue_transactions(
 
 void BlueStore::_txc_aio_submit(TransContext *txc)
 {
-  dout(10) << __func__ << " txc " << txc << dendl;
-  bdev->aio_submit(&txc->ioc);
+  dout(20) << __func__ << " txc " << txc
+          << ", bdev " << (txc->ioc.dev == bdev) << dendl;
+  assert(txc->ioc.dev);
+  if (txc->ioc.dev == bdev)
+    bdev->aio_submit(&txc->ioc);
+  else {
+    assert(txc->ioc.dev == bdev_fast);
+    bdev_fast->aio_submit(&txc->ioc);
+  }
 }
 
 void BlueStore::_txc_add_transaction(TransContext *txc, Transaction *t)
@@ -10365,7 +10388,7 @@ void BlueStore::_do_write_small(
 						 b, &wctx->old_extents);
 	  b->dirty_blob().mark_used(le->blob_offset, le->length);
 	  txc->statfs_delta.stored() += le->length;
-	  dout(20) << __func__ << "  lex " << *le << dendl;
+	  dout(1) << __func__ << "  lex " << *le << dendl;
 	  logger->inc(l_bluestore_write_small_deferred);
 	  return;
 	}
@@ -11213,12 +11236,13 @@ int BlueStore::_write(TransContext *txc,
 		      bufferlist& bl,
 		      uint32_t fadvise_flags, bool inlined)
 {
-  dout(15) << __func__ << " " << c->cid << " " << o->oid
+  dout(20) << __func__ << " " << c->cid << " " << o->oid
            << " 0x" << std::hex << offset << "~" << length
            << " fadvise_flags: 0x" << fadvise_flags << std::dec
            << " inlined: " << inlined
            << " data_inline_limit_bytes: "
            << cct->_conf->data_inline_limit_bytes
+           << ", on fast " << o->onode.has_hint_flag_fast()
            << dendl;
   int r = 0;
   if (offset + length >= OBJECT_MAX_SIZE) {
@@ -11820,13 +11844,20 @@ int BlueStore::_move_data_between_tiers(
   bool promote = (flags & CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER);
   bufferlist bl;
 
+  dout(15) << __func__ << " slow2fast " << std::boolalpha << promote
+          << std::noboolalpha
+          << ", preallocated " << txc->preallocated
+          << ", txc " << txc
+          << ", min_alloc_size " << min_alloc_size
+          << ", " << o->oid
+          << dendl;
+
   uint64_t size = o->onode.size;
   if (size == 0) {
     o->onode.alloc_hint_flags = flags;
     txc->write_onode(o);
     goto out;
   }
-
   r = _do_read(c.get(), o, 0, size, bl, 0);
   if (r < 0)
     goto out;
@@ -11839,12 +11870,6 @@ int BlueStore::_move_data_between_tiers(
   } else {
     r = alloc->reserve(txc->preallocated);
   }
-  dout(1) << __func__ << " slow2fast " << std::boolalpha << promote
-          << std::noboolalpha
-          << ", preallocated " << txc->preallocated
-          << ", txc " << txc
-          << ", min_alloc_size " << min_alloc_size
-          << dendl;
   if (r < 0)
     goto out;
 

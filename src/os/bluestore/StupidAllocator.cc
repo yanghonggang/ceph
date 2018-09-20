@@ -89,7 +89,7 @@ int64_t StupidAllocator::allocate_int(
   uint64_t *offset, uint32_t *length)
 {
   std::lock_guard<std::mutex> l(lock);
-  dout(10) << __func__ << " want_size 0x" << std::hex << want_size
+  dout(1) << __func__ << " want_size 0x" << std::hex << want_size
 	   << " alloc_unit 0x" << alloc_unit
 	   << " hint 0x" << hint << std::dec
 	   << dendl;
@@ -170,8 +170,10 @@ int64_t StupidAllocator::allocate_int(
       *length = max;
     }
   }
-  dout(30) << __func__ << " got 0x" << std::hex << *offset << "~" << *length
+  dout(1) << __func__ << " got 0x" << std::hex << *offset << "~" << *length
 	   << " from bin " << std::dec << bin << dendl;
+  assert((*offset % alloc_unit) == 0);
+  assert((*length % alloc_unit) == 0);
 
   free[bin].erase(*offset, *length);
   uint64_t off, len;

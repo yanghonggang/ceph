@@ -3373,20 +3373,20 @@ std::vector<Option> get_global_options() {
     .add_see_also("bluestore_csum_min_block"),
 
     Option("bluestore_min_alloc_size", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
-    .set_default(0)
+    .set_default(32_K)
     .add_tag("mkfs")
     .set_description("Minimum allocation size to allocate for an object")
     .set_long_description("A smaller allocation size generally means less data is read and then rewritten when a copy-on-write operation is triggered (e.g., when writing to something that was recently snapshotted).  Similarly, less data is journaled before performing an overwrite (writes smaller than min_alloc_size must first pass through the BlueStore journal).  Larger values of min_alloc_size reduce the amount of metadata required to describe the on-disk layout and reduce overall fragmentation."),
 
     Option("bluestore_min_alloc_size_hdd", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
-    .set_default(64_K)
+    .set_default(32_K)
     .add_tag("mkfs")
-    .set_description("Default min_alloc_size value for rotational media"),
+    .set_description("Default min_alloc_size value for rotational media, default val is 64K. if you want to use osd tier, this val must be 32K"),
 
     Option("bluestore_min_alloc_size_ssd", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
-    .set_default(16_K)
+    .set_default(32_K)
     .add_tag("mkfs")
-    .set_description("Default min_alloc_size value for non-rotational (solid state)  media"),
+    .set_description("Default min_alloc_size value for non-rotational (solid state)  media, default val is 16K, if you want to use os tier, this val must be 32K"),
 
     Option("bluestore_max_alloc_size", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
     .set_default(0)
@@ -3468,14 +3468,14 @@ std::vector<Option> get_global_options() {
     .set_description(""),
 
     Option("bluestore_max_blob_size_hdd", Option::TYPE_UINT, Option::LEVEL_DEV)
-    .set_default(512_K)
+    .set_default(128_K)
     .set_safe()
-    .set_description(""),
+    .set_description("default val is 512K, but if you want to use osd tier, this val must be 128K"),
 
     Option("bluestore_max_blob_size_ssd", Option::TYPE_UINT, Option::LEVEL_DEV)
-    .set_default(64_K)
+    .set_default(128_K)
     .set_safe()
-    .set_description(""),
+    .set_description("default val is 64K, but if you want to use osd tier, this val must be 128K"),
 
     Option("bluestore_compression_required_ratio", Option::TYPE_FLOAT, Option::LEVEL_ADVANCED)
     .set_default(.875)

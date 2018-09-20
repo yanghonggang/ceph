@@ -699,6 +699,11 @@ int KernelDevice::aio_write(
   IOContext *ioc,
   bool buffered)
 {
+  if (!ioc->dev) 
+    ioc->dev = this;
+  else
+    assert(ioc->dev == this);
+
   uint64_t len = bl.length();
   dout(20) << __func__ << " 0x" << std::hex << off << "~" << len << std::dec
 	   << (buffered ? " (buffered)" : " (direct)")

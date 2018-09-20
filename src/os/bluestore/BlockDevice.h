@@ -29,6 +29,7 @@
 #define SPDK_PREFIX "spdk:"
 
 /// track in-flight io
+class BlockDevice;
 struct IOContext {
 private:
   std::mutex lock;
@@ -49,7 +50,8 @@ public:
   std::atomic_int num_pending = {0};
   std::atomic_int num_running = {0};
   bool allow_eio;
-
+  BlockDevice* dev = nullptr;
+  
   explicit IOContext(CephContext* cct, void *p, bool allow_eio = false)
     : cct(cct), priv(p), allow_eio(allow_eio)
     {}
