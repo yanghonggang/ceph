@@ -6636,13 +6636,13 @@ int BlueStore::statfs(struct store_statfs_t *buf,
     fast_buf->available = alloc_fast->get_free();
     float free_ratio = ((float)(fast_buf->available) / (float)(fast_buf->total
                         + 1));
-    dout(1) << __func__ << " fast available/total "
+    dout(20) << __func__ << " fast available/total "
             <<  fast_buf->available << "/"
             << fast_buf->total
             << "=" << free_ratio
             << dendl;
-  } else { // DELETE ME
-    dout(1) << __func__ << " fast_buf is null" << dendl;
+  } else {
+    dout(20) << __func__ << " fast_buf is null" << dendl;
   }
 
   if (bluefs) {
@@ -7025,7 +7025,7 @@ int BlueStore::_do_read(
     interval_set<uint32_t> cache_interval;
     bptr->shared_blob->bc.read(
       bptr->shared_blob->get_cache(), b_off, b_len, cache_res, cache_interval);
-    dout(1) << __func__ << "  blob " << *bptr << std::hex
+    dout(20) << __func__ << "  blob " << *bptr << std::hex
 	     << " need 0x" << b_off << "~" << b_len
 	     << " cache has 0x" << cache_interval
 	     << std::dec
@@ -7039,7 +7039,7 @@ int BlueStore::_do_read(
 	  pc->first == b_off) {
 	l = pc->second.length();
 	ready_regions[pos].claim(pc->second);
-	dout(1) << __func__ << "    use cache 0x" << std::hex << pos << ": 0x"
+	dout(22) << __func__ << "    use cache 0x" << std::hex << pos << ": 0x"
 		 << b_off << "~" << l << std::dec
                  << ", " << o->oid << dendl;
 	++pc;
@@ -7049,7 +7049,7 @@ int BlueStore::_do_read(
 	  assert(pc->first > b_off);
 	  l = pc->first - b_off;
 	}
-	dout(1) << __func__ << "    will read 0x" << std::hex << pos << ": 0x"
+	dout(22) << __func__ << "    will read 0x" << std::hex << pos << ": 0x"
 		 << b_off << "~" << l << std::dec
                  << ", " << o->oid
                  << ", blob " << bptr << dendl;
@@ -7072,7 +7072,7 @@ int BlueStore::_do_read(
   IOContext ioc(cct, NULL, true); // allow EIO
   for (auto& p : blobs2read) {
     const BlobRef& bptr = p.first;
-    dout(1) << __func__ << "  blob " << *bptr << std::hex
+    dout(20) << __func__ << "  blob " << *bptr << std::hex
 	     << " need " << p.second << std::dec << dendl;
     if (bptr->get_blob().is_compressed()) {
       // read the whole thing
@@ -7120,7 +7120,7 @@ int BlueStore::_do_read(
 	if (tail) {
 	  r_len += chunk_size - tail;
 	}
-	dout(1) << __func__ << "    region 0x" << std::hex
+	dout(20) << __func__ << "    region 0x" << std::hex
 		 << reg.logical_offset
 		 << ": 0x" << reg.blob_xoffset << "~" << reg.length
 		 << " reading 0x" << reg.r_off << "~" << r_len << std::dec
@@ -7133,7 +7133,7 @@ int BlueStore::_do_read(
 	  [&](uint64_t offset, uint64_t length) {
 	    int r;
 	    // use aio if there is more than one region to read
-	    dout(1) << __func__ << ", dev " << (bdev_target == bdev)
+	    dout(22) << __func__ << ", dev " << (bdev_target == bdev)
                     << std::hex << ", [0x" << offset << "~0x" << length << "]"
                     << ", aio_read " << (num_regions > 1)
                     << ", blob " << bptr
@@ -7187,7 +7187,7 @@ int BlueStore::_do_read(
         if (retry_count >= static_cast<uint8_t>(cct->_conf->bluestore_retry_disk_reads)) {
 	  return -EIO;
         }
-        dout(1) << __func__ << " csum error encountered, retry: retry_count "
+        derr << __func__ << " csum error encountered, retry: retry_count "
                 << retry_count
                 << dendl;
         return _do_read(c, o, offset, length, bl, op_flags, retry_count + 1);
@@ -7211,7 +7211,7 @@ int BlueStore::_do_read(
           if (retry_count >= static_cast<uint8_t>(cct->_conf->bluestore_retry_disk_reads)) {
 	    return -EIO;
           }
-          dout(1) << __func__ << " csum error encountered, retry: retry_count "
+          derr << __func__ << " csum error encountered, retry: retry_count "
                   << retry_count
                   << dendl;
           return _do_read(c, o, offset, length, bl, op_flags, retry_count + 1);
@@ -7260,7 +7260,7 @@ int BlueStore::_do_read(
   r = bl.length();
 
   if (retry_count) {
-    dout(5) << __func__ << " read at 0x" << std::hex << offset << "~" << length
+    dout(1) << __func__ << " read at 0x" << std::hex << offset << "~" << length
             << " failed " << std::dec << retry_count << " times before succeeding" << dendl;
   }
 
@@ -7747,7 +7747,7 @@ int BlueStore::_collection_list(
     if (fast) {
       OnodeRef o = c->get_onode(oid, false);
       bool on_fast = o->onode.alloc_hint_flags & CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER;
-      dout(1) << __func__ << " oid " << oid << ", fast " << on_fast << dendl;
+      dout(20) << __func__ << " oid " << oid << ", fast " << on_fast << dendl;
       fast->push_back(on_fast);
     }
     it->next();
@@ -9501,7 +9501,7 @@ void BlueStore::_deferred_aio_finish(OpSequencer *osr)
     b->num_iocs --;
     if (b->num_iocs.load()) {
     //if (b->ioc.has_running_aios() || b->ioc_fast.has_running_aios()) {
-      dout(1) << __func__ << " ioc num_running " << b->ioc.num_running
+      dout(15) << __func__ << " ioc num_running " << b->ioc.num_running
               << ", ioc fast num_running " << b->ioc_fast.num_running
               << ": wait for all finished"
               << dendl;
@@ -9682,7 +9682,7 @@ int BlueStore::queue_transactions(
 
 void BlueStore::_txc_aio_submit(TransContext *txc)
 {
-  dout(20) << __func__ << " txc " << txc
+  dout(10) << __func__ << " txc " << txc
           << ", bdev " << (txc->ioc.dev == bdev) << dendl;
   assert(txc->ioc.dev);
   if (txc->ioc.dev == bdev)
@@ -10416,7 +10416,7 @@ void BlueStore::_do_write_small(
 						 b, &wctx->old_extents);
 	  b->dirty_blob().mark_used(le->blob_offset, le->length);
 	  txc->statfs_delta.stored() += le->length;
-	  dout(1) << __func__ << "  lex " << *le << dendl;
+	  dout(15) << __func__ << "  lex " << *le << dendl;
 	  logger->inc(l_bluestore_write_small_deferred);
 	  return;
 	}
@@ -10745,7 +10745,7 @@ int BlueStore::_do_alloc_write(
     // the unneeded space to allocator
     // FIXME: why not only reserve @need?
     int64_t unreserve = wctx->preallocated - need;
-    dout(1) << __func__ << " wctx " << wctx
+    dout(15) << __func__ << " wctx " << wctx
             << ", unreserve " << unreserve
             << ", need " << need
             << ", min_alloc_size " << min_alloc_size
@@ -11207,7 +11207,7 @@ int BlueStore::_do_write(
     wctx.preallocated = txc->preallocated;
     // clear preallocated, or it will mislead the next write operation
     txc->preallocated = 0;
-    dout(1) << __func__ << " &wctx " << &wctx
+    dout(15) << __func__ << " &wctx " << &wctx
             << " txc " << txc
             << " preallocated " << wctx.preallocated
             << dendl;
@@ -11264,7 +11264,7 @@ int BlueStore::_write(TransContext *txc,
 		      bufferlist& bl,
 		      uint32_t fadvise_flags, bool inlined)
 {
-  dout(20) << __func__ << " " << c->cid << " " << o->oid
+  dout(15) << __func__ << " " << c->cid << " " << o->oid
            << " 0x" << std::hex << offset << "~" << length
            << " fadvise_flags: 0x" << fadvise_flags << std::dec
            << " inlined: " << inlined
@@ -11863,7 +11863,7 @@ int BlueStore::_move_data_between_tiers(
 		     uint32_t flags)
 {
   if (g_conf->bluestore_inject_migration_err) {
-    dout(0) << __func__ << ": inject random migration error, "
+    derr << __func__ << ": inject random migration error, "
             << o->oid << dendl;
     return -EIO;
   }

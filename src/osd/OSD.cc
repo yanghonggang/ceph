@@ -977,7 +977,7 @@ void OSDService::update_osd_stat(vector<int>& hb_peers)
     return;
   }
 
-  dout(1) << __func__ << " fast: total " << stbuf_fast.total
+  dout(15) << __func__ << " fast: total " << stbuf_fast.total
           << ", available " << stbuf_fast.available
           << dendl;
   auto new_stat = set_osd_stat(stbuf, hb_peers, osd->get_num_pgs(), stbuf_fast);

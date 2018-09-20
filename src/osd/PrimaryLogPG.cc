@@ -1217,7 +1217,7 @@ void PrimaryLogPG::do_pg_op(OpRequestRef op)
         map<hobject_t, bool> entries;
         for (size_t i = 0; i < sentries.size(); i++) {
           entries[sentries[i]] = fast[i];
-          dout(30) << "<" << sentries[i] << ", " << fast[i] << ">" << dendl;
+          dout(20) << "<" << sentries[i] << ", " << fast[i] << ">" << dendl;
         }
 
 	map<hobject_t, pg_missing_item>::const_iterator missing_iter =
@@ -1288,7 +1288,7 @@ void PrimaryLogPG::do_pg_op(OpRequestRef op)
 	  if (filter && !pgls_filter(filter, candidate, filter_out))
 	    continue;
 
-          dout(1) << "pgnls item 0x" << std::hex
+          dout(15) << "pgnls item 0x" << std::hex
             << candidate.get_hash()
             << ", rev 0x" << hobject_t::_reverse_bits(candidate.get_hash())
             << std::dec << " "
@@ -2490,7 +2490,7 @@ PrimaryLogPG::cache_result_t PrimaryLogPG::maybe_handle_cache_detail(
     return cache_result_t::NOOP;
 
   if (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL) {
-    dout(1) << __func__ << ": ignoring cache due to cache mode local"
+    dout(10) << __func__ << ": ignoring cache due to cache mode local"
             << dendl;
     return cache_result_t::NOOP;
   }
@@ -2705,7 +2705,7 @@ bool PrimaryLogPG::maybe_promote(ObjectContextRef obc,
                                  uint32_t recency,
                                  bool may_write)
 {
-  dout(1) << __func__
+  dout(10) << __func__
           << " " << obc->obs.oi
           << ", in_hit_set " << in_hit_set
           << ", recency " << recency
@@ -2762,7 +2762,7 @@ bool PrimaryLogPG::maybe_promote(ObjectContextRef obc,
   }
 
   if (osd->promote_throttle()) {
-    dout(1) << __func__ << " promote throttled" << dendl;
+    dout(10) << __func__ << " promote throttled" << dendl;
     return false;
   }
   return agent_maybe_migrate(obc, true, may_write);
@@ -4597,10 +4597,10 @@ void PrimaryLogPG::maybe_create_new_object(
       ctx->op_t->set_alloc_hint(obs.oi.soid, obs.oi.expected_object_size,
                                 obs.oi.expected_write_size,
                                 obs.oi.alloc_hint_flags);
-      dout(1) << __func__ << " add fast tier alloc hint for " << obs.oi << dendl;
+      dout(10) << __func__ << " add fast tier alloc hint for " << obs.oi << dendl;
     }
     if (agent_state)
-      dout(1) << __func__ << " " << agent_state->get_evict_mode_name()
+      dout(10) << __func__ << " " << agent_state->get_evict_mode_name()
               << " " << obs.oi
               << dendl;
     if (!ignore_transaction && obs.oi.is_on_tier())
@@ -5407,7 +5407,7 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	  ::encode(oi.size, osd_op.outdata);
 	  ::encode(oi.mtime, osd_op.outdata);
 	  ::encode(oi.is_on_tier(), osd_op.outdata);
-	  dout(1) << "stat oi: " << oi << dendl;
+	  dout(15) << "stat oi: " << oi << dendl;
 	} else {
 	  result = -ENOENT;
 	  dout(10) << "stat oi object does not exist" << dendl;
@@ -6014,7 +6014,7 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
             oi.clear_on_tier();
             t->set_alloc_hint(oi.soid, oi.expected_object_size,
                               oi.expected_write_size, obs.oi.alloc_hint_flags);
-            dout(1) << __func__ << " cache is full, migrate to slow dev first: "
+            dout(10) << __func__ << " cache is full, migrate to slow dev first: "
                     << oi
                     << dendl;
           }
@@ -13193,8 +13193,7 @@ bool PrimaryLogPG::agent_work(int start_max, int agent_flush_quota)
 {
   lock();
   if (!agent_state) {
-    // FIXME
-    dout(1) << __func__ << " no agent state, stopping" << dendl;
+    dout(10) << __func__ << " no agent state, stopping" << dendl;
     unlock();
     return true;
   }
@@ -13202,16 +13201,14 @@ bool PrimaryLogPG::agent_work(int start_max, int agent_flush_quota)
   assert(!deleting);
 
   if (agent_state->is_idle()) {
-    // FIXME
-    dout(1) << __func__ << " idle, stopping" << dendl;
+    dout(10) << __func__ << " idle, stopping" << dendl;
     unlock();
     return true;
   }
 
   osd->logger->inc(l_osd_agent_wake);
 
-  // FIXME
-  dout(1) << __func__
+  dout(10) << __func__
 	   << " max " << start_max
 	   << ", flush " << agent_state->get_flush_mode_name()
 	   << ", evict " << agent_state->get_evict_mode_name()
@@ -13242,11 +13239,11 @@ bool PrimaryLogPG::agent_work(int start_max, int agent_flush_quota)
   int r = pgbackend->objects_list_partial(agent_state->position, ls_min, ls_max,
 					  &ls, &next, &fast);
   assert(r >= 0);
-  dout(1) << __func__ << " got " << ls.size() << " objects" << dendl;
+  dout(20) << __func__ << " got " << ls.size() << " objects" << dendl;
   map<hobject_t, bool> entries;
   for (size_t i = 0; i < ls.size(); i++) {
     entries[ls[i]] = fast[i];
-    dout(30) << "<" << ls[i] << ", " << fast[i] << ">" << dendl;
+    dout(20) << "<" << ls[i] << ", " << fast[i] << ">" << dendl;
   }
   int started = 0;
   for (vector<hobject_t>::iterator p = ls.begin();
@@ -13424,7 +13421,7 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote,
   if (cct->_conf->osd_agent_skip_migrate)
     return false;
 
-  dout(1) << __func__ << " " << obc->obs.oi
+  dout(15) << __func__ << " " << obc->obs.oi
           << ", promote " << promote
           << dendl;
   const hobject_t& soid = obc->obs.oi.soid;
@@ -13433,7 +13430,7 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote,
   bool fast = (obc->obs.oi.alloc_hint_flags &
                CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER);
   if (promote == fast) {
-    dout(1) << __func__
+    dout(15) << __func__
             << " skip (already on the right dev) " << obc->obs.oi.soid
             << dendl;
     osd->logger->inc(l_osd_agent_skip);
@@ -13442,25 +13439,25 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote,
 
   if (promote && agent_state && agent_state->evict_mode ==
       TierAgentState::EVICT_MODE_FULL) {
-    dout(1) << __func__ << " skip (cache dev full) " << obc->obs.oi << dendl;
+    dout(15) << __func__ << " skip (cache dev full) " << obc->obs.oi << dendl;
     osd->logger->inc(l_osd_agent_skip);
     return false;
   }
 
   if (obc->is_blocked()) {
-    dout(1) << __func__ << " skip (blocked) " << obc->obs.oi << dendl;
+    dout(15) << __func__ << " skip (blocked) " << obc->obs.oi << dendl;
     osd->logger->inc(l_osd_agent_skip);
     return false;
   }
   if (obc->obs.oi.is_cache_pinned() && !promote) {
-    dout(1) << __func__ << " skip (cache_pinned) " << obc->obs.oi
+    dout(5) << __func__ << " skip (cache_pinned) " << obc->obs.oi
             << ", promote " << promote << dendl;
     osd->logger->inc(l_osd_agent_skip);
     return false;
   }
 
   if (osd->agent_is_active_oid(obc->obs.oi.soid)) {
-    dout(1) << __func__ << " skip (flushing) " << obc->obs.oi << dendl;
+    dout(15) << __func__ << " skip (flushing) " << obc->obs.oi << dendl;
     osd->logger->inc(l_osd_agent_skip);
     return false;
   }
@@ -13483,7 +13480,7 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote,
     }
     if (!evict_mode_full &&
         (ob_local_mtime + utime_t(pool.info.cache_min_evict_age, 0) > now)) {
-      dout(1) << __func__ << " skip (too young) " << obc->obs.oi << dendl;
+      dout(15) << __func__ << " skip (too young) " << obc->obs.oi << dendl;
       osd->logger->inc(l_osd_agent_skip);
       return false;
     }
@@ -13496,7 +13493,7 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote,
         agent_estimate_temp(soid, &temp);
       agent_state->temp_hist.add(temp);
       agent_state->temp_hist.get_position_micro(temp, &temp_lower, &temp_upper);
-      dout(1) << __func__
+      dout(15) << __func__
               << " temp " << temp
               << " pos " << temp_lower << "-" << temp_upper
               << ", evict_effort " << agent_state->evict_effort
@@ -13506,7 +13503,7 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote,
     }
   } else {
     if (evict_mode_full) {
-      dout(1) << __func__
+      dout(15) << __func__
               << " skip(evict_mode_full) " << obc->obs.oi
               << dendl;
       return false;
@@ -13521,7 +13518,7 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote,
        obc,
        OpRequestRef())) {
     close_op_ctx(ctx.release());
-    dout(1) << __func__ << " skip (cannot get lock) " << obc->obs.oi << dendl;
+    dout(10) << __func__ << " skip (cannot get lock) " << obc->obs.oi << dendl;
     return false; 
   }
 
@@ -13785,7 +13782,7 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
   bool local_mode = (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL);
   // Let delay play out
   if (agent_state->delaying) {
-    dout(1) << __func__ << this << " delaying, ignored" << dendl;
+    dout(20) << __func__ << this << " delaying, ignored" << dendl;
     return requeued;
   }
 
@@ -13795,7 +13792,7 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
 
   if (info.stats.stats_invalid) {
     // idle; stats can't be trusted until we scrub.
-    dout(1) << __func__ << " stats invalid (post-split), idle" << dendl;
+    dout(20) << __func__ << " stats invalid (post-split), idle" << dendl;
     goto skip_calc;
   }
 
@@ -13839,7 +13836,7 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
       num_dirty = 0;
   }
 
-  dout(1) << __func__
+  dout(10) << __func__
 	   << " flush_mode: "
 	   << TierAgentState::get_flush_mode_name(agent_state->flush_mode)
 	   << " evict_mode: "
@@ -13877,7 +13874,7 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
       dev_full_micro = MIN(1000000, 
                                     uint64_t(dev_full_ratio * 1000000 * 1.1));
  
-      dout(1) << __func__
+      dout(10) << __func__
               << " dev_full_micro = " << dev_full_micro
               << ", full_micro = " << full_micro
               << dendl;
@@ -13896,7 +13893,7 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
     if (full_objects_micro > full_micro)
       full_micro = full_objects_micro;
   }
-  dout(1) << __func__ << " dirty " << ((float)dirty_micro / 1000000.0)
+  dout(10) << __func__ << " dirty " << ((float)dirty_micro / 1000000.0)
 	   << ", full " << ((float)full_micro / 1000000.0)
 	   << ", dev_full " << ((float)dev_full_micro / 1000000.0)
 	   << ", full_objects " << ((float)full_objects_micro / 1000000.0)
@@ -13955,9 +13952,9 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
     if (evict_effort < inc)
       evict_effort = inc;
     assert(evict_effort >= inc && evict_effort <= 1000000);
-    dout(1) << __func__ << " evict_effort " << was << " quantized by " << inc << " to " << evict_effort << dendl;
+    dout(10) << __func__ << " evict_effort " << was << " quantized by " << inc << " to " << evict_effort << dendl;
   }
-    dout(1) << __func__ << " evict_effort " << evict_effort
+    dout(10) << __func__ << " evict_effort " << evict_effort
             << ", full_micro " << full_micro
             << ", evict_target " << evict_target
             << dendl;
@@ -13967,7 +13964,7 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
   bool old_idle = agent_state->is_idle();
   // don't need to update flush_mode when pool cache mode is local 
   if (!local_mode && (flush_mode != agent_state->flush_mode)) {
-    dout(1) << __func__ << " flush_mode "
+    dout(5) << __func__ << " flush_mode "
 	    << TierAgentState::get_flush_mode_name(agent_state->flush_mode)
 	    << " -> "
 	    << TierAgentState::get_flush_mode_name(flush_mode)
@@ -13988,7 +13985,7 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
   }
 
   if (evict_mode != agent_state->evict_mode) {
-    dout(1) << __func__ << " evict_mode "
+    dout(5) << __func__ << " evict_mode "
 	    << TierAgentState::get_evict_mode_name(agent_state->evict_mode)
 	    << " -> "
 	    << TierAgentState::get_evict_mode_name(evict_mode)
@@ -14018,7 +14015,7 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
   }
   uint64_t old_effort = agent_state->evict_effort;
   if (evict_effort != agent_state->evict_effort) {
-    dout(1) << __func__ << " evict_effort "
+    dout(5) << __func__ << " evict_effort "
 	    << ((float)agent_state->evict_effort / 1000000.0)
 	    << " -> "
 	    << ((float)evict_effort / 1000000.0)
