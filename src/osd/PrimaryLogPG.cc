@@ -13048,19 +13048,24 @@ void PrimaryLogPG::hit_set_persist()
   obc->obs.oi.set_data_digest(bl.crc32c(-1));
 
   // force create hit object on fast dev
-  obc->obs.oi.set_on_tier();
-  ctx->op_t->set_alloc_hint(obc->obs.oi.soid,
-                            obc->obs.oi.size,
-                            obc->obs.oi.size,
-                            obc->obs.oi.alloc_hint_flags);
+  bool local_mode = (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL);
+  if (local_mode) {
+    obc->obs.oi.set_on_tier();
+    ctx->op_t->set_alloc_hint(obc->obs.oi.soid,
+                              obc->obs.oi.size,
+                              obc->obs.oi.size,
+                              obc->obs.oi.alloc_hint_flags);
+  }
 
   ctx->new_obs = obc->obs;
 
   obc->ssc->snapset.head_exists = true;
   ctx->new_snapset = obc->ssc->snapset;
 
-  ctx->delta_stats.num_objects++;
-  ctx->delta_stats.num_objects_fast++;
+  if (local_mode) {
+    ctx->delta_stats.num_objects++;
+    ctx->delta_stats.num_objects_fast++;
+  }
   ctx->delta_stats.num_objects_hit_set_archive++;
   ctx->delta_stats.num_bytes += bl.length();
   ctx->delta_stats.num_bytes_fast += bl.length();
@@ -13127,10 +13132,13 @@ void PrimaryLogPG::hit_set_trim(OpContextUPtr &ctx, unsigned max)
     ObjectContextRef obc = get_object_context(oid, false);
     assert(obc);
     --ctx->delta_stats.num_objects;
-    --ctx->delta_stats.num_objects_fast;
+    bool local_mode = (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL);
+    if (local_mode) {
+      --ctx->delta_stats.num_objects_fast;
+      ctx->delta_stats.num_bytes_fast -= obc->obs.oi.size;
+    }
     --ctx->delta_stats.num_objects_hit_set_archive;
     ctx->delta_stats.num_bytes -= obc->obs.oi.size;
-    ctx->delta_stats.num_bytes_fast -= obc->obs.oi.size;
     ctx->delta_stats.num_bytes_hit_set_archive -= obc->obs.oi.size;
   }
 }
