@@ -2907,15 +2907,22 @@ void PGMap::get_health_checks(
       bool nearfull = false;
       const string& name = osdmap.get_pool_name(p.first);
       const pool_stat_t& st = get_pg_pool_sum_stat(p.first);
+      bool local_mode = (st.stats.sum.num_bytes_fast |
+                         st.stats.sum.num_objects_fast);
       uint64_t ratio = p.second.cache_target_full_ratio_micro +
 	((1000000 - p.second.cache_target_full_ratio_micro) *
 	 cct->_conf->mon_cache_target_full_warn_ratio);
+      uint64_t num_objects = (local_mode ? st.stats.sum.num_objects_fast :
+                              st.stats.sum.num_objects);
+      uint64_t num_bytes = (local_mode ? st.stats.sum.num_bytes_fast :
+                            st.stats.sum.num_bytes);
+      string head = local_mode ? "tier '" : "cache pool '";
       if (p.second.target_max_objects &&
-	  (uint64_t)(st.stats.sum.num_objects -
+	  (uint64_t)(num_objects -
 		     st.stats.sum.num_objects_hit_set_archive) >
 	  p.second.target_max_objects * (ratio / 1000000.0)) {
 	ostringstream ss;
-	ss << "cache pool '" << name << "' with "
+	ss << head << name << "' with "
 	   << si_t(st.stats.sum.num_objects)
 	   << " objects at/near target max "
 	   << si_t(p.second.target_max_objects) << " objects";
@@ -2923,11 +2930,11 @@ void PGMap::get_health_checks(
 	nearfull = true;
       }
       if (p.second.target_max_bytes &&
-	  (uint64_t)(st.stats.sum.num_bytes -
+	  (uint64_t)(num_bytes -
 		     st.stats.sum.num_bytes_hit_set_archive) >
 	  p.second.target_max_bytes * (ratio / 1000000.0)) {
 	ostringstream ss;
-	ss << "cache pool '" << name
+	ss << head << name
 	   << "' with " << si_t(st.stats.sum.num_bytes)
 	   << "B at/near target max "
 	   << si_t(p.second.target_max_bytes) << "B";
@@ -2940,7 +2947,7 @@ void PGMap::get_health_checks(
     }
     if (!detail.empty()) {
       ostringstream ss;
-      ss << num_pools << " cache pools at or near target size";
+      ss << num_pools << " cache at or near target size";
       auto& d = checks->add("CACHE_POOL_NEAR_FULL", HEALTH_WARN, ss.str());
       d.detail.swap(detail);
     }
