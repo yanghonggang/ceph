@@ -6299,7 +6299,9 @@ int BlueStore::_fsck(bool deep, bool repair)
           sbi.fast = on_fast;
 	  for (auto e : blob.get_extents()) {
 	    if (e.is_valid()) {
-	      sbi.ref_map.get(e.get_offset(), e.length);
+              // NOTE: when we compare ref_map, it should with fast flag
+              // so don't use get_offset() here
+	      sbi.ref_map.get(e.offset, e.length);
 	    }
 	  }
 	} else {
