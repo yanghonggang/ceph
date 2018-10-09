@@ -3489,6 +3489,10 @@ public:
       --(state->in_flight);
       bufferlist r2;
       r = state->store->read(state->cid, noid, 0, state->contents[noid].data.length(), r2);
+      if (!bl_eq(state->contents[noid].data, r2)) {
+        cerr << "right data: " << state->contents[noid].data
+             << ", read back: " << r2 << std::endl;
+      }
       assert(bl_eq(state->contents[noid].data, r2));
       state->cond.Signal();
     }
@@ -3632,6 +3636,13 @@ public:
       case 2:
 	f |= CEPH_OSD_ALLOC_HINT_FLAG_INCOMPRESSIBLE;
 	break;
+      }
+    }
+    {
+      boost::uniform_int<> u(0, 1);
+      switch (u(*rng)) {
+      case 1:
+        f |= CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER;
       }
     }
     return f;
@@ -7215,6 +7226,9 @@ int main(int argc, char **argv) {
   g_ceph_context->_conf->set_val("bluestore_block_size",
     stringify(DEF_STORE_TEST_BLOCKDEV_SIZE));
 
+  g_ceph_context->_conf->set_val("bluestore_block_fast_create", "true");
+  g_ceph_context->_conf->set_val("bluestore_block_fast_path",
+                                 "osd_fast_0");
   g_ceph_context->_conf->set_val(
     "enable_experimental_unrecoverable_data_corrupting_features", "*");
   g_ceph_context->_conf->apply_changes(NULL);

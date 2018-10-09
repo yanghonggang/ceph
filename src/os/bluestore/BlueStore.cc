@@ -12004,6 +12004,8 @@ int BlueStore::_clone(TransContext *txc,
     newo->onode.clear_omap_flag();
   }
 
+  newo->onode.alloc_hint_flags = oldo->onode.alloc_hint_flags;
+
   txc->write_onode(newo);
   r = 0;
 
@@ -12160,7 +12162,8 @@ int BlueStore::_clone_range(TransContext *txc,
   _assign_nid(txc, newo);
 
   if (length > 0) {
-    if (cct->_conf->bluestore_clone_cow) {
+    bool same_dev = (newo->onode.alloc_hint_flags == oldo->onode.alloc_hint_flags);
+    if (cct->_conf->bluestore_clone_cow && same_dev) {
       _do_zero(txc, c, newo, dstoff, length);
       _do_clone_range(txc, c, oldo, newo, srcoff, length, dstoff);
     } else {
