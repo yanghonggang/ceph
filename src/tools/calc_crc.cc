@@ -28,7 +28,8 @@ using namespace std;
 
 void usage()
 {
-  cout << " usage: <file> <offset> <length>" << std::endl;
+  cout << " usage: <file> <offset> <length> [OPTIONS]..." << std::endl;
+  cout << "  -d, --dump		also dump its content" << std::endl;
   exit(1);
 }
 
@@ -40,6 +41,7 @@ int main(int argc, const char** argv)
   string dev_path, off_str, len_str;
   uint64_t off = 0;
   uint64_t len = 0;
+  bool dump = false;
 
   string val;
   ostringstream err;
@@ -64,6 +66,8 @@ int main(int argc, const char** argv)
         cerr << "error parsing interger value " << interr << std::endl;
         exit(EXIT_FAILURE);
       }
+    } else if (ceph_argparse_flag(args, i, "-d", "--dump", (char*)NULL)){
+      dump = true;
     } else {
       usage();
     }
@@ -91,6 +95,13 @@ int main(int argc, const char** argv)
     bufferlist bl;
     bl.append(bptr);
     cerr << "crc: " << std::hex << bl.crc32c(-1) << std::dec << std::endl;
+
+    if (dump) {
+      cerr << "------ dump begin -------\n";
+      bl.hexdump(cerr);
+      cerr << "------ dump end -------\n";
+      cerr << std::endl;
+    }
   }
 out_close:
   if (dev_fd >= 0)
