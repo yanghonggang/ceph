@@ -11412,6 +11412,7 @@ int BlueStore::_do_truncate(
     o->onode.attrs[INLINE_DATA_ATTR] = bufferptr();
     o->onode.attrs.erase(INLINE_DATA_ATTR);
     o->onode.inline_valid = false;
+    o->onode.clear_flag(CEPH_OSD_ALLOC_HINT_FLAG_INLINE);
     _dump_onode(o);
   } else {
     if (offset < o->onode.size) {
