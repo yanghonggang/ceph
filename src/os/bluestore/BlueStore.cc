@@ -3061,6 +3061,7 @@ void BlueStore::DeferredBatch::_discard(
 	auto &n = iomap[offset + length];
 	n.bl.swap(tail);
 	n.seq = p->second.seq;
+        n.fast = (offset & bluestore_pextent_t::FAST_TIER_MASK);
 	i->second -= length;
       } else {
 	i->second -= end - offset;
@@ -3087,6 +3088,7 @@ void BlueStore::DeferredBatch::_discard(
 	       << std::dec << dendl;
       auto &s = iomap[offset + length];
       s.seq = p->second.seq;
+      s.fast = (offset & bluestore_pextent_t::FAST_TIER_MASK); 
       s.bl.substr_of(p->second.bl, drop_front, keep_tail);
       i->second -= drop_front;
     } else {
@@ -9382,8 +9384,10 @@ void BlueStore::_deferred_queue(TransContext *txc)
     assert(op.op == bluestore_deferred_op_t::OP_WRITE);
     bufferlist::const_iterator p = op.data.begin();
     for (auto e : op.extents) {
+      // we depond on fast tag to distinghuish deffered io
+      // to fast/slow devs in _discard()
       txc->osr->deferred_pending->prepare_write(
-	cct, wt.seq, e.get_offset(), e.length, p, e.is_on_fast_tier());
+	cct, wt.seq, e.offset, e.length, p, e.is_on_fast_tier());
     }
   }
   if (deferred_aggressive &&
@@ -9457,7 +9461,8 @@ void BlueStore::_deferred_submit_unlock(OpSequencer *osr)
               b->num_iocs ++;
               has_fast = true;
             }
-	    r = bdev_fast->aio_write(start, bl, &b->ioc_fast, false);
+            // deffered io for fast dev has fast tag with its offset
+	    r = bdev_fast->aio_write((start & ~bluestore_pextent_t::FAST_TIER_MASK), bl, &b->ioc_fast, false);
           } else {
             if (!has_slow) {
               b->num_iocs ++;
