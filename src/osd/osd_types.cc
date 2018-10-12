@@ -1965,6 +1965,7 @@ void object_stat_sum_t::dump(Formatter *f) const
   f->dump_int("num_evict", num_evict);
   f->dump_int("num_evict_kb", num_evict_kb);
   f->dump_int("num_promote", num_promote);
+  f->dump_int("num_promote_kb", num_promote_kb);
   f->dump_int("num_flush_mode_high", num_flush_mode_high);
   f->dump_int("num_flush_mode_low", num_flush_mode_low);
   f->dump_int("num_evict_mode_some", num_evict_mode_some);
@@ -1977,7 +1978,7 @@ void object_stat_sum_t::dump(Formatter *f) const
 
 void object_stat_sum_t::encode(bufferlist& bl) const
 {
-  ENCODE_START(17, 14, bl);
+  ENCODE_START(18, 14, bl);
 #if defined(CEPH_LITTLE_ENDIAN)
   bl.append((char *)(&num_bytes), sizeof(object_stat_sum_t));
 #else
@@ -2018,6 +2019,7 @@ void object_stat_sum_t::encode(bufferlist& bl) const
   ::encode(num_legacy_snapsets, bl);
   ::encode(num_bytes_fast, bl);
   ::encode(num_objects_fast, bl);
+  ::encode(num_promote_kb, bl);
 #endif
   ENCODE_FINISH(bl);
 }
@@ -2025,9 +2027,10 @@ void object_stat_sum_t::encode(bufferlist& bl) const
 void object_stat_sum_t::decode(bufferlist::iterator& bl)
 {
   bool decode_finish = false;
-  DECODE_START(17, bl);
+  DECODE_START(18, bl);
 #if defined(CEPH_LITTLE_ENDIAN)
-  if (struct_v >= 16) {
+  if (struct_v >= 18) {
+    // NOTE: this must match newest decode version
     bl.copy(sizeof(object_stat_sum_t), (char*)(&num_bytes));
     decode_finish = true;
   }
@@ -2075,6 +2078,9 @@ void object_stat_sum_t::decode(bufferlist::iterator& bl)
     if (struct_v >= 17) {
       ::decode(num_bytes_fast, bl);
       ::decode(num_objects_fast, bl);
+    }
+    if (struct_v >= 18) {
+      ::decode(num_promote_kb, bl);
     }
   }
   DECODE_FINISH(bl);
@@ -2157,6 +2163,7 @@ void object_stat_sum_t::add(const object_stat_sum_t& o)
   num_legacy_snapsets += o.num_legacy_snapsets;
   num_bytes_fast += o.num_bytes_fast;
   num_objects_fast += o.num_objects_fast;
+  num_promote_kb += o.num_promote_kb;
 }
 
 void object_stat_sum_t::sub(const object_stat_sum_t& o)
@@ -2198,6 +2205,7 @@ void object_stat_sum_t::sub(const object_stat_sum_t& o)
   num_legacy_snapsets -= o.num_legacy_snapsets;
   num_bytes_fast -= o.num_bytes_fast;
   num_objects_fast -= o.num_objects_fast;
+  num_promote_kb -= o.num_promote_kb;
 }
 
 bool operator==(const object_stat_sum_t& l, const object_stat_sum_t& r)
@@ -2239,7 +2247,8 @@ bool operator==(const object_stat_sum_t& l, const object_stat_sum_t& r)
     l.num_objects_pinned == r.num_objects_pinned &&
     l.num_legacy_snapsets == r.num_legacy_snapsets &&
     l.num_bytes_fast == r.num_bytes_fast &&
-    l.num_objects_fast == r.num_objects_fast;
+    l.num_objects_fast == r.num_objects_fast &&
+    l.num_promote_kb == r.num_promote_kb;
 }
 
 // -- object_stat_collection_t --

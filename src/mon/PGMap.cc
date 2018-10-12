@@ -548,6 +548,15 @@ void PGMapDigest::cache_io_rate_summary(Formatter *f, ostream *out,
   }
   if (pos_delta.stats.sum.num_evict) {
     int64_t evict = (pos_delta.stats.sum.num_evict_kb << 10) / (double)delta_stamp;
+    int64_t demote = pos_delta.stats.sum.num_evict / (double)delta_stamp;
+    if (f) {
+      f->dump_int("demote_op_per_sec", demote);
+    } else {
+      if (have_output)
+        *out << ", ";
+      *out << pretty_si_t(demote) << "op/s demote";
+      have_output = true;
+    }
     if (f) {
       f->dump_int("evict_bytes_sec", evict);
     } else {
@@ -559,12 +568,21 @@ void PGMapDigest::cache_io_rate_summary(Formatter *f, ostream *out,
   }
   if (pos_delta.stats.sum.num_promote) {
     int64_t promote = pos_delta.stats.sum.num_promote / (double)delta_stamp;
+    int64_t promote_bytes = (pos_delta.stats.sum.num_promote_kb << 10) / (double)delta_stamp;
     if (f) {
       f->dump_int("promote_op_per_sec", promote);
     } else {
       if (have_output)
 	*out << ", ";
       *out << pretty_si_t(promote) << "op/s promote";
+      have_output = true;
+    }
+    if (f) {
+      f->dump_int("promote_bytes_sec", promote_bytes);
+    } else {
+      if (have_output)
+	*out << ", ";
+      *out << pretty_si_t(promote_bytes) << "B/s promote";
       have_output = true;
     }
   }

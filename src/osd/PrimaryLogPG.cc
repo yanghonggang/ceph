@@ -13568,12 +13568,16 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote,
     assert(!oi.is_on_tier());
     ctx->delta_stats.num_bytes_fast += oi.size;
     ctx->delta_stats.num_objects_fast++;
+    info.stats.stats.sum.num_promote++;
+    ctx->delta_stats.num_promote_kb += SHIFT_ROUND_UP(obc->obs.oi.size, 10);
     oi.set_on_tier();
   } else {
     assert(oi.is_on_tier());
     ctx->delta_stats.num_bytes_fast -= oi.size;
     ctx->delta_stats.num_objects_fast--;
+    ctx->delta_stats.num_evict_kb += SHIFT_ROUND_UP(obc->obs.oi.size, 10);
     oi.clear_on_tier();
+    info.stats.stats.sum.num_evict++;
   }
   t->set_alloc_hint(soid, oi.expected_object_size, oi.expected_write_size,
                     oi.alloc_hint_flags);
