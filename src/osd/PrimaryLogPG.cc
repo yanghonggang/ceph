@@ -13063,12 +13063,12 @@ void PrimaryLogPG::hit_set_persist()
   ctx->new_snapset = obc->ssc->snapset;
 
   if (local_mode) {
-    ctx->delta_stats.num_objects++;
     ctx->delta_stats.num_objects_fast++;
+    ctx->delta_stats.num_bytes_fast += bl.length();
   }
+  ctx->delta_stats.num_objects++;
   ctx->delta_stats.num_objects_hit_set_archive++;
   ctx->delta_stats.num_bytes += bl.length();
-  ctx->delta_stats.num_bytes_fast += bl.length();
   ctx->delta_stats.num_bytes_hit_set_archive += bl.length();
 
   bufferlist bss;
