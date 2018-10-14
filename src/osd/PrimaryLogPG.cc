@@ -13049,7 +13049,9 @@ void PrimaryLogPG::hit_set_persist()
 
   // force create hit object on fast dev
   bool local_mode = (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL);
-  if (local_mode) {
+  bool fast = (local_mode && (agent_state->evict_mode !=
+      TierAgentState::EVICT_MODE_FULL));
+  if (fast) {
     obc->obs.oi.set_on_tier();
     ctx->op_t->set_alloc_hint(obc->obs.oi.soid,
                               obc->obs.oi.size,
@@ -13062,7 +13064,7 @@ void PrimaryLogPG::hit_set_persist()
   obc->ssc->snapset.head_exists = true;
   ctx->new_snapset = obc->ssc->snapset;
 
-  if (local_mode) {
+  if (fast) {
     ctx->delta_stats.num_objects_fast++;
     ctx->delta_stats.num_bytes_fast += bl.length();
   }
@@ -13132,8 +13134,7 @@ void PrimaryLogPG::hit_set_trim(OpContextUPtr &ctx, unsigned max)
     ObjectContextRef obc = get_object_context(oid, false);
     assert(obc);
     --ctx->delta_stats.num_objects;
-    bool local_mode = (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL);
-    if (local_mode) {
+    if (obc->obs.oi.is_on_tier()) {
       --ctx->delta_stats.num_objects_fast;
       ctx->delta_stats.num_bytes_fast -= obc->obs.oi.size;
     }
