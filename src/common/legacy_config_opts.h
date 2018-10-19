@@ -636,6 +636,7 @@ OPTION(osd_pool_default_cache_local_mode_fast, OPT_BOOL) // write to fast dev by
 OPTION(osd_hit_set_min_size, OPT_INT)  // min target size for a HitSet
 OPTION(osd_hit_set_max_size, OPT_INT)  // max target size for a HitSet
 OPTION(osd_hit_set_namespace, OPT_STR) // rados namespace for hit_set tracking
+OPTION(osd_hit_set_on_slow, OPT_BOOL) // store hit set on slow dev by default
 
 // conservative default throttling values
 OPTION(osd_tier_promote_max_objects_sec, OPT_U64)

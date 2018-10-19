@@ -13051,7 +13051,7 @@ void PrimaryLogPG::hit_set_persist()
   bool local_mode = (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL);
   bool fast = (local_mode && (agent_state->evict_mode !=
       TierAgentState::EVICT_MODE_FULL));
-  if (fast) {
+  if (fast && !cct->_conf->osd_hit_set_on_slow) {
     obc->obs.oi.set_on_tier();
     ctx->op_t->set_alloc_hint(obc->obs.oi.soid,
                               obc->obs.oi.size,

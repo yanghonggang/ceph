@@ -1853,6 +1853,10 @@ std::vector<Option> get_global_options() {
     .set_default(".ceph-internal")
     .set_description(""),
 
+    Option("osd_hit_set_on_slow", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+    .set_default(false)
+    .set_description("store hit set objects on slow dev by default"),
+
     Option("osd_tier_promote_max_objects_sec", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
     .set_default(25)
     .set_description(""),
@@ -3326,7 +3330,7 @@ std::vector<Option> get_global_options() {
     .add_see_also("bluestore_block_wal_size"),
 
     Option("bluestore_block_fast_path", Option::TYPE_STR, Option::LEVEL_DEV)
-    .set_default("")
+    .set_default("/dev/disk/by-partlabel/osd_fast_0")
     .add_tag("mkfs")
     .set_description("Path to fast block device/file"),
 
