@@ -11911,7 +11911,7 @@ int BlueStore::_move_data_between_tiers(
     txc->write_onode(o);
     goto out;
   }
-  r = _do_read(c.get(), o, 0, size, bl, CEPH_OSD_OP_FLAG_FADVISE_DONTNEED);
+  r = _do_read(c.get(), o, 0, size, bl, 0/*CEPH_OSD_OP_FLAG_FADVISE_DONTNEED*/);
   if (r < 0)
     goto out;
 
@@ -11931,9 +11931,9 @@ int BlueStore::_move_data_between_tiers(
   o->onode.alloc_hint_flags = flags;
   txc->write_onode(o);
 
-  r = _do_write(txc, c, o, 0, size, bl, (promote ?
+  r = _do_write(txc, c, o, 0, size, bl, 0/*(promote ?
                 CEPH_OSD_OP_FLAG_FADVISE_WILLNEED :
-                CEPH_OSD_OP_FLAG_FADVISE_DONTNEED));
+                CEPH_OSD_OP_FLAG_FADVISE_DONTNEED)*/);
   assert(r == 0);
 
  out:
