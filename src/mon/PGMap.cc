@@ -2415,6 +2415,80 @@ void PGMap::dump_filtered_pg_stats(Formatter *f, set<pg_t>& pgs) const
   f->close_section();
 }
 
+void PGMap::dump_filtered_pg_stats_per_osd(Formatter *f, set<pg_t>& pgs) const
+{
+  f->open_object_section("osd_df_by_pool");
+  f->open_array_section("osd_pg");
+  std::map<int32_t, int32_t> osd2pgnums;
+  for (const auto& pg : pgs) {
+    const pg_stat_t& st = pg_stat.at(pg);
+    for (const auto& osd : st.up) {
+      osd2pgnums[osd]++;
+    }
+  }
+
+  int32_t max = -1;
+  int32_t min = INT32_MAX;
+  double avg = 0;
+  for (const auto& o : osd2pgnums) {
+    if (o.second > max)
+      max = o.second;
+    if (o.second < min)
+      min = o.second;
+    avg += o.second;
+    f->open_object_section("osd_pg");
+    f->dump_int("osd", o.first);
+    f->dump_int("pgs", o.second);
+    f->close_section();
+  }
+  f->close_section();
+  avg /= osd2pgnums.size();
+  f->open_object_section("summary");
+  f->dump_int("MAX", max);
+  f->dump_int("MIN", min);
+  f->dump_float("AVG", avg);
+  f->close_section();
+
+  f->close_section();
+}
+
+void PGMap::dump_filtered_pg_stats_per_osd(ostream& ss, set<pg_t>& pgs) const
+{
+  TextTable tab;
+  tab.define_column("OSD", TextTable::LEFT, TextTable::LEFT);
+  tab.define_column("PGS", TextTable::LEFT, TextTable::LEFT);
+
+  std::map<int32_t, int32_t> osd2pgnums;
+  for (const auto& pg : pgs) {
+    const pg_stat_t& st = pg_stat.at(pg);
+    for (const auto& osd : st.up) {
+      osd2pgnums[osd]++;
+    }
+  }
+
+  int32_t max = -1;
+  int32_t min = INT32_MAX;
+  double avg = 0;
+  for (const auto& o : osd2pgnums) {
+    if (o.second > max)
+      max = o.second;
+    if (o.second < min)
+      min = o.second;
+    avg += o.second;
+    tab << o.first
+        << o.second
+        << TextTable::endrow;
+  }
+  avg /= osd2pgnums.size();
+  tab << "MIN:"
+      << min << TextTable::endrow;
+  tab << "MAX:"
+      << max << TextTable::endrow;
+  tab << "AVG:"
+      << avg
+      << TextTable::endrow;
+  ss << tab;
+}
 void PGMap::dump_filtered_pg_stats(ostream& ss, set<pg_t>& pgs) const
 {
   TextTable tab;
@@ -3841,6 +3915,7 @@ int process_pg_map_command(
 
   // perhaps these would be better in the parsing, but it's weird
   bool primary = false;
+  bool osd_df_by_pool = false;
   if (prefix == "pg dump_json") {
     vector<string> v;
     v.push_back(string("all"));
@@ -3858,7 +3933,11 @@ int process_pg_map_command(
     prefix = "pg ls";
   } else if (prefix == "pg ls-by-osd") {
     prefix = "pg ls";
-  } else if (prefix == "pg ls-by-pool") {
+  } else if (prefix == "pg ls-by-pool" ||
+             prefix == "pg osd-df-by-pool") {
+    if (prefix == "pg osd-df-by-pool")
+      osd_df_by_pool = true;
+
     prefix = "pg ls";
     string poolstr;
     cmd_getval(g_ceph_context, cmdmap, "poolstr", poolstr);
@@ -4001,12 +4080,22 @@ int process_pg_map_command(
 
     pg_map.get_filtered_pg_stats(state, pool, osd, primary, pgs);
 
-    if (f && !pgs.empty()) {
-      pg_map.dump_filtered_pg_stats(f, pgs);
-      f->flush(*odata);
-    } else if (!pgs.empty()) {
-      pg_map.dump_filtered_pg_stats(ds, pgs);
-      odata->append(ds);
+    if (!osd_df_by_pool) {
+      if (f && !pgs.empty()) {
+        pg_map.dump_filtered_pg_stats(f, pgs);
+        f->flush(*odata);
+      } else if (!pgs.empty()) {
+        pg_map.dump_filtered_pg_stats(ds, pgs);
+        odata->append(ds);
+      }
+    } else {
+      if (f && !pgs.empty()) {
+        pg_map.dump_filtered_pg_stats_per_osd(f, pgs);
+        f->flush(*odata);
+      } else {
+        pg_map.dump_filtered_pg_stats_per_osd(ds, pgs);
+        odata->append(ds);
+      }
     }
     return 0;
   }
