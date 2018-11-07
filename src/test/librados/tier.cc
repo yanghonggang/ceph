@@ -5516,3 +5516,119 @@ TEST_F(LibRadosTwoPoolsECPP, SetRedirectRead) {
   // wait for maps to settle before next test
   cluster.wait_for_latest_osdmap();
 }
+
+class LibRadosLocalTier : public RadosTestPP
+{
+public:
+  LibRadosLocalTier() {}
+  ~LibRadosLocalTier() override {};
+protected:
+  void SetUp() override {
+    bufferlist inbl;
+    RadosTestPP::SetUp();
+
+    // setup ssd tier
+    ASSERT_EQ(0, cluster.mon_command(
+      "{\"prefix\": \"osd tier cache-mode\", \"pool\": \"" + pool_name +
+      "\", \"mode\": \"local\", \"sure\": \"--yes-i-really-mean-it\"}", 
+      inbl, NULL, NULL));
+    ASSERT_EQ(0, cluster.mon_command(set_pool_str(pool_name, "hit_set_type",
+                                                  "bloom"),
+      inbl, NULL, NULL));
+    ASSERT_EQ(0, cluster.mon_command(set_pool_str(pool_name, "hit_set_count",
+                                                  4),
+      inbl, NULL, NULL));
+    ASSERT_EQ(0, cluster.mon_command(set_pool_str(pool_name, "hit_set_period",
+                                                  60),
+      inbl, NULL, NULL));
+    ASSERT_EQ(0, cluster.mon_command(set_pool_str(pool_name,
+                                       "min_read_recency_for_promote", 2),
+      inbl, NULL, NULL));
+    ASSERT_EQ(0, cluster.mon_command(set_pool_str(pool_name,
+                                       "min_write_recency_for_promote", 2),
+      inbl, NULL, NULL));
+    // store to ssd by default
+    ASSERT_EQ(0, cluster.mon_command(set_pool_str(pool_name,
+                                       "cache_local_mode_default_fast", 1),
+      inbl, NULL, NULL));
+  }
+  void TearDown() override {
+    // tier down 
+    bufferlist inbl;
+    ASSERT_EQ(0, cluster.mon_command(
+      "{\"prefix\": \"osd tier cache-mode\", \"pool\": \"" + pool_name +
+      "\", \"mode\": \"none\"}", 
+      inbl, NULL, NULL));
+    RadosTestPP::TearDown();
+  }
+  void deep_scrub(std::string obj) {
+    bufferlist inbl;
+    uint32_t hash;
+    ASSERT_EQ(0, ioctx.get_object_pg_hash_position2(obj, &hash)); 
+    do {
+      ostringstream ss;
+      ss << "{\"prefix\": \"pg deep-scrub\", \"pgid\": \""
+         << ioctx.get_id() << "." << hash
+         << "\"}";
+      cout << ss.str() << std::endl;
+      int r = cluster.mon_command(ss.str(), inbl, NULL, NULL);
+      if (r == -ENOENT || r == -EAGAIN) {
+        sleep(5);
+      }
+   } while (false);
+  }
+  void cluster_status_is(std::string status, bool& ret) {
+    bufferlist inbl;
+    bufferlist outbl;
+    ASSERT_EQ(0, cluster.mon_command(
+      "{\"prefix\":\"health\"}", inbl, &outbl, NULL));
+    std::string out = outbl.to_str();
+    cout << "health: " << out << std::endl;
+    ret = (std::string::npos != out.find(status));
+  }
+};
+
+TEST_F(LibRadosLocalTier, SnapClone) {
+  // create object
+  bufferlist bl1, bl2;
+  bl1.append("123456789");
+  bl2.append("abcdefghi123456789");
+  {
+    ObjectWriteOperation op;
+    op.write_full(bl1);
+    ASSERT_EQ(0, ioctx.operate("hehe", &op));
+  }
+  // create a snapshot
+  vector<uint64_t> snaps(1);
+  ASSERT_EQ(0, ioctx.selfmanaged_snap_create(&snaps[0]));
+  // setup snapc
+  ASSERT_EQ(0, ioctx.selfmanaged_snap_set_write_ctx(snaps[0], snaps));
+  // trigger clone operation
+  {
+    ObjectWriteOperation op;
+    op.write_full(bl2);
+    ASSERT_EQ(0, ioctx.operate("hehe", &op));
+  }
+  // do deep-scrub
+  deep_scrub("hehe");
+  cout << "waiting for deep-scrub ..." << std::endl;
+  sleep(30);
+  cout << "done waiting" << std::endl;
+  // check health
+  bool error = false;
+  cluster_status_is("HEALTH_ERR", error);
+  ASSERT_EQ(error, false);
+
+  // read snap
+  {
+    bufferlist bl;
+    uint64_t len = bl1.length();
+    ioctx.snap_set_read(snaps[0]);
+    ASSERT_EQ(len, ioctx.read("hehe", bl, len, 0));
+    cout << "bl1: " << bl1.c_str() << std::endl;
+    cout << "bl: " << bl.c_str() << std::endl;
+    ASSERT_EQ(true, bl1.contents_equal(bl));
+  }
+  // cleanup
+  ioctx.selfmanaged_snap_remove(snaps[0]);
+}
