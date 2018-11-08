@@ -1428,17 +1428,17 @@ int KStore::collection_bits(const coll_t& cid)
 
 int KStore::collection_list(
   const coll_t& cid, const ghobject_t& start, const ghobject_t& end, int max,
-  vector<ghobject_t> *ls, ghobject_t *pnext, vector<bool> *fast)
+  vector<ghobject_t> *ls, ghobject_t *pnext)
 {
   CollectionHandle c = _get_collection(cid);
   if (!c)
     return -ENOENT;
-  return collection_list(c, start, end, max, ls, pnext, fast);
+  return collection_list(c, start, end, max, ls, pnext);
 }
 
 int KStore::collection_list(
   CollectionHandle &c_, const ghobject_t& start, const ghobject_t& end, int max,
-  vector<ghobject_t> *ls, ghobject_t *pnext, vector<bool> *fast)
+  vector<ghobject_t> *ls, ghobject_t *pnext)
 
 {
   Collection *c = static_cast<Collection*>(c_.get());

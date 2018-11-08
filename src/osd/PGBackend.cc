@@ -333,8 +333,7 @@ int PGBackend::objects_list_partial(
   int min,
   int max,
   vector<hobject_t> *ls,
-  hobject_t *next,
-  vector<bool> *fast)
+  hobject_t *next)
 {
   assert(ls);
   // Starts with the smallest generation to make sure the result list
@@ -351,29 +350,25 @@ int PGBackend::objects_list_partial(
 
   while (!_next.is_max() && ls->size() < (unsigned)min) {
     vector<ghobject_t> objects;
-    vector<bool> on_fast;
     r = store->collection_list(
       ch,
       _next,
       ghobject_t::get_max(),
       max - ls->size(),
       &objects,
-      &_next,
-      (fast == NULL) ? NULL : &on_fast);
+      &_next);
     if (r != 0) {
       derr << __func__ << " list collection " << ch << " got: " << cpp_strerror(r) << dendl;
       break;
     }
-    vector<ghobject_t>::iterator i = objects.begin();
-    vector<bool>::iterator j = on_fast.begin();
-    for (; i != objects.end(); ++i, ++j) {
+    for (vector<ghobject_t>::iterator i = objects.begin();
+         i != objects.end();
+         ++i) {
       if (i->is_pgmeta() || i->hobj.is_temp()) {
 	continue;
       }
       if (i->is_no_gen()) {
 	ls->push_back(i->hobj);
-        if (fast)
-          fast->push_back(*j);
       }
     }
   }

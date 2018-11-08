@@ -1172,7 +1172,6 @@ void PrimaryLogPG::do_pg_op(OpRequestRef op)
         dout(10) << " pgnls pg=" << m->get_pg() << " count " << list_size << dendl;
 	// read into a buffer
         vector<hobject_t> sentries;
-        vector<bool> fast;
 
         pg_nls_response_t response;
 	try {
@@ -1206,24 +1205,15 @@ void PrimaryLogPG::do_pg_op(OpRequestRef op)
 	  list_size,
 	  list_size,
 	  &sentries,
-	  &next,
-          &fast);
+	  &next);
 	if (r != 0) {
 	  result = -EINVAL;
 	  break;
 	}
 
-        assert(fast.size() == sentries.size());
-        map<hobject_t, bool> entries;
-        for (size_t i = 0; i < sentries.size(); i++) {
-          entries[sentries[i]] = fast[i];
-          dout(20) << "<" << sentries[i] << ", " << fast[i] << ">" << dendl;
-        }
-
 	map<hobject_t, pg_missing_item>::const_iterator missing_iter =
 	  pg_log.get_missing().get_items().lower_bound(current);
 	vector<hobject_t>::iterator ls_iter = sentries.begin();
-        auto fast_iter = fast.begin();
 	hobject_t _max = hobject_t::get_max();
 	while (1) {
 	  const hobject_t &mcand =
@@ -1240,7 +1230,6 @@ void PrimaryLogPG::do_pg_op(OpRequestRef op)
 	    candidate = mcand;
 	    if (!mcand.is_max()) {
 	      ++ls_iter;
-              ++fast_iter;
 	      ++missing_iter;
 	    }
 	  } else if (mcand < lcand) {
@@ -1251,7 +1240,6 @@ void PrimaryLogPG::do_pg_op(OpRequestRef op)
 	    candidate = lcand;
 	    assert(!lcand.is_max());
 	    ++ls_iter;
-            ++fast_iter;
 	  }
 
           dout(10) << " pgnls candidate 0x" << std::hex << candidate.get_hash()
@@ -1293,14 +1281,14 @@ void PrimaryLogPG::do_pg_op(OpRequestRef op)
             << ", rev 0x" << hobject_t::_reverse_bits(candidate.get_hash())
             << std::dec << " "
             << candidate.oid.name
-            << " , fast " << entries[candidate]
+            << " , fast " << candidate.is_on_fast()
             << dendl;
 
 	  librados::ListObjectImpl item;
 	  item.nspace = candidate.get_namespace();
 	  item.oid = candidate.oid.name;
 	  item.locator = candidate.get_key();
-	  item.on_fast = entries[candidate];
+	  item.on_fast = candidate.is_on_fast();
 	  response.entries.push_back(item);
 	}
 
@@ -13252,17 +13240,11 @@ bool PrimaryLogPG::agent_work(int start_max, int agent_flush_quota)
   // NOTE: do not flush the Sequencer.  we will assume that the
   // listing we get back is imprecise.
   vector<hobject_t> ls;
-  vector<bool> fast;
   hobject_t next;
   int r = pgbackend->objects_list_partial(agent_state->position, ls_min, ls_max,
-					  &ls, &next, &fast);
+					  &ls, &next);
   assert(r >= 0);
   dout(20) << __func__ << " got " << ls.size() << " objects" << dendl;
-  map<hobject_t, bool> entries;
-  for (size_t i = 0; i < ls.size(); i++) {
-    entries[ls[i]] = fast[i];
-    dout(20) << "<" << ls[i] << ", " << fast[i] << ">" << dendl;
-  }
   int started = 0;
   for (vector<hobject_t>::iterator p = ls.begin();
        p != ls.end();
@@ -13322,7 +13304,7 @@ bool PrimaryLogPG::agent_work(int start_max, int agent_flush_quota)
     if (agent_state->evict_mode != TierAgentState::EVICT_MODE_IDLE) {
       if (((pool.info.cache_mode != pg_pool_t::CACHEMODE_LOCAL) &&
            agent_maybe_evict(obc, false)) ||
-          (entries[*p] && agent_maybe_migrate(obc, false)))
+          (p->is_on_fast() && agent_maybe_migrate(obc, false)))
       ++started;
     } else if (agent_state->flush_mode != TierAgentState::FLUSH_MODE_IDLE &&
              agent_flush_quota > 0 && agent_maybe_flush(obc)) {

@@ -525,8 +525,7 @@ typedef ceph::shared_ptr<const OSDMap> OSDMapRef;
      int min,
      int max,
      vector<hobject_t> *ls,
-     hobject_t *next,
-     vector<bool> *fast = NULL);
+     hobject_t *next);
 
    int objects_list_range(
      const hobject_t &start,

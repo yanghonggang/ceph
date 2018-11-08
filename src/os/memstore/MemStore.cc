@@ -482,8 +482,7 @@ int MemStore::collection_list(const coll_t& cid,
 			      const ghobject_t& end,
 			      int max,
 			      vector<ghobject_t> *ls,
-                              ghobject_t *next,
-                              vector<bool> *fast)
+                              ghobject_t *next)
 {
   CollectionRef c = get_collection(cid);
   if (!c)

@@ -1919,15 +1919,13 @@ public:
 			      const ghobject_t& start, const ghobject_t& end,
 			      int max,
 			      vector<ghobject_t> *ls,
-                              ghobject_t *next,
-                              vector<bool> *fast = NULL) = 0;
+                              ghobject_t *next) = 0;
   virtual int collection_list(CollectionHandle &c,
 			      const ghobject_t& start, const ghobject_t& end,
 			      int max,
 			      vector<ghobject_t> *ls,
-                              ghobject_t *next,
-                              vector<bool> *fast = NULL) {
-    return collection_list(c->get_cid(), start, end, max, ls, next, fast);
+                              ghobject_t *next) {
+    return collection_list(c->get_cid(), start, end, max, ls, next);
   }
 
 

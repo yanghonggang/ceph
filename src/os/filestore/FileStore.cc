@@ -4958,8 +4958,7 @@ int FileStore::collection_list(const coll_t& c,
 			       const ghobject_t& end,
 			       int max,
 			       vector<ghobject_t> *ls,
-                               ghobject_t *next,
-                               vector<bool> *fast)
+                               ghobject_t *next)
 {
   ghobject_t start = orig_start;
   if (start.is_max())

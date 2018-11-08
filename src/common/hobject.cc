@@ -97,6 +97,11 @@ string hobject_t::to_str() const
   append_escaped(get_key(), &out);
   out.push_back('.');
   append_escaped(nspace, &out);
+  out.push_back('.');
+  if (fast)
+    out.push_back('f');
+  else
+    out.push_back('s');
 
   return out;
 }
@@ -142,7 +147,6 @@ void hobject_t::decode(bufferlist::iterator& bl)
       pool = INT64_MIN;
       assert(is_min());
     }
-
     // for compatibility with some earlier verisons which might encoded
     // a non-canonical max object
     if (max) {
@@ -173,6 +177,8 @@ void hobject_t::decode(json_spirit::Value& v)
       pool = p.value_.get_int();
     else if (p.name_ == "namespace")
       nspace = p.value_.get_str();
+    else if (p.name_ == "fast")
+      fast = p.value_.get_bool();
   }
   build_hash_cache();
 }
@@ -186,6 +192,7 @@ void hobject_t::dump(Formatter *f) const
   f->dump_int("max", (int)max);
   f->dump_int("pool", pool);
   f->dump_string("namespace", nspace);
+  f->dump_bool("fast", fast);
 }
 
 void hobject_t::generate_test_instances(list<hobject_t*>& o)
@@ -255,7 +262,7 @@ ostream& operator<<(ostream& out, const hobject_t& o)
   append_out_escaped(o.get_key(), &v);
   v.push_back(':');
   append_out_escaped(o.oid.name, &v);
-  out << v << ':' << o.snap;
+  out << v << ':' << o.snap << ':' << o.fast;
   return out;
 }
 
@@ -348,6 +355,10 @@ int cmp(const hobject_t& l, const hobject_t& r)
     return -1;
   if (l.snap > r.snap)
     return 1;
+  if ((int)l.fast > (int)r.fast)
+    return 1;
+  if ((int)l.fast < (int)r.fast)
+    return -1;
   return 0;
 }
 
