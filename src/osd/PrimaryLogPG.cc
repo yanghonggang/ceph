@@ -2209,6 +2209,9 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
       op->hitset_inserted = true;
       if (hit_set->is_full() ||
           hit_set_start_stamp + pool.info.hit_set_period <= m->get_recv_stamp()) {
+        dout(10) << __func__ << " hit set full? "
+                 << hit_set->is_full()
+                 << dendl;
         hit_set_persist();
       }
     }
@@ -7405,6 +7408,9 @@ void PrimaryLogPG::make_writeable(OpContext *ctx)
     snap_oi->version = ctx->at_version;
     snap_oi->prior_version = ctx->obs->oi.version;
     snap_oi->copy_user_bits(ctx->obs->oi);
+    // snap objects and head object should on the same device
+    if (ctx->obs->oi.is_on_tier())
+      snap_oi->set_on_tier();
 
     bool legacy = ctx->new_snapset.is_legacy() ||
       get_osdmap()->require_osd_release < CEPH_RELEASE_LUMINOUS;
@@ -7413,7 +7419,7 @@ void PrimaryLogPG::make_writeable(OpContext *ctx)
     }
 
     _make_clone(ctx, ctx->op_t.get(), ctx->clone_obc, soid, coid, snap_oi);
-    
+
     ctx->delta_stats.num_objects++;
     if (snap_oi->is_on_tier())
       ctx->delta_stats.num_objects_fast++;
@@ -7462,8 +7468,8 @@ void PrimaryLogPG::make_writeable(OpContext *ctx)
       interval_set<uint64_t> &newest_overlap = ctx->new_snapset.clone_overlap.rbegin()->second;
       ctx->modified_ranges.intersection_of(newest_overlap);
       // modified_ranges is still in use by the clone
-      // FIXME: TODO
-      add_interval_usage(ctx->modified_ranges, ctx->delta_stats);
+      add_interval_usage(ctx->modified_ranges, ctx->delta_stats,
+                         ctx->obs->oi.is_on_tier());
       newest_overlap.subtract(ctx->modified_ranges);
     }
   }
@@ -7508,10 +7514,13 @@ void PrimaryLogPG::write_update_size_and_usage(object_stat_sum_t& delta_stats, o
   delta_stats.num_wr_kb += SHIFT_ROUND_UP(length, 10);
 }
 
-void PrimaryLogPG::add_interval_usage(interval_set<uint64_t>& s, object_stat_sum_t& delta_stats)
+void PrimaryLogPG::add_interval_usage(interval_set<uint64_t>& s,
+       object_stat_sum_t& delta_stats, bool fast)
 {
   for (interval_set<uint64_t>::const_iterator p = s.begin(); p != s.end(); ++p) {
     delta_stats.num_bytes += p.get_len();
+    if (fast)
+      delta_stats.num_bytes_fast += p.get_len();
   }
 }
 
@@ -14321,9 +14330,10 @@ void PrimaryLogPG::scrub_snapshot_metadata(
       // A clone num_bytes will be added later when we have snapset
       if (!soid.is_snap()) {
 	stat.num_bytes += oi->size;
+        if (oi->is_on_tier())
+          stat.num_bytes_fast += oi->size;
       }
       if (oi->is_on_tier()) {
-        stat.num_bytes_fast += oi->size;
         stat.num_objects_fast++;
       }
       if (soid.nspace == cct->_conf->osd_hit_set_namespace)
