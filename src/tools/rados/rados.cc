@@ -1246,7 +1246,11 @@ static int do_cache_demote_all(IoCtx& io_ctx)
     librados::NObjectIterator i_end = io_ctx.nobjects_end();
     for (; i != i_end; i++) {
       int r;
-      cout << i->get_nspace() << "\t" << i->get_oid() << "\t" << i->get_locator() << std::endl;
+      cout << i->get_nspace()
+           << "\t" << i->get_oid()
+           << "\t" << i->get_locator()
+           << "\t" << (i->is_on_fast() ? "fast" : "slow")
+           << std::endl;
       if (i->get_locator().size()) {
         io_ctx.locator_set_key(i->get_locator());
       } else {
@@ -1265,14 +1269,17 @@ static int do_cache_demote_all(IoCtx& io_ctx)
       std::vector<clone_info_t>::iterator ci = ls.clones.begin();
       // no snapshots
       if (ci == ls.clones.end()) {
-        r = do_migrate(io_ctx, i->get_oid(), false);
-        if (r < 0) {
-          cerr << "failed to demote " << i->get_nspace() << "/" << i->get_oid() << ": "
-               << cpp_strerror(r) << std::endl;
-          errors ++;
-          continue;
-        } 
+        if (i->is_on_fast()) {
+          r = do_migrate(io_ctx, i->get_oid(), false);
+          if (r < 0) {
+            cerr << "failed to demote " << i->get_nspace() << "/" << i->get_oid() << ": "
+                 << cpp_strerror(r) << std::endl;
+            errors ++;
+            continue;
+          }
+        }
       } else {
+        // FIXME: don't know whether a clone/snap objects is on fast device or not
         for (std::vector<clone_info_t>::iterator ci = ls.clones.begin();
              ci != ls.clones.end(); ci++) {
           io_ctx.snap_set_read(ci->cloneid);
