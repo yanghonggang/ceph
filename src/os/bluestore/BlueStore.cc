@@ -7665,7 +7665,7 @@ int BlueStore::collection_list(
 
 int BlueStore::_collection_list(
   Collection *c, const ghobject_t& start, const ghobject_t& end, int max,
-  vector<ghobject_t> *ls, ghobject_t *pnext)
+  vector<ghobject_t> *ls, ghobject_t *pnext, bool skip_fast)
 {
 
   if (!c->exists)
@@ -7758,17 +7758,17 @@ int BlueStore::_collection_list(
     int r = get_key_object(it->key(), &oid);
     assert(r == 0);
     dout(20) << __func__ << " oid " << oid << " end " << end << dendl;
-    {
-      OnodeRef o = c->get_onode(oid, false);
-      bool on_fast = o->onode.alloc_hint_flags & CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER;
-      dout(20) << __func__ << " oid " << oid << ", fast " << on_fast << dendl;
-      oid.hobj.fast = on_fast;
-    }
     if (ls->size() >= (unsigned)max) {
       dout(20) << __func__ << " reached max " << max << dendl;
       *pnext = oid;
       set_next = true;
       break;
+    }
+    if (!skip_fast) {
+      OnodeRef o = c->get_onode(oid, false);
+      bool on_fast = o->onode.alloc_hint_flags & CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER;
+      dout(20) << __func__ << " oid " << oid << ", fast " << on_fast << dendl;
+      oid.hobj.fast = on_fast;
     }
     ls->push_back(oid);
     it->next();
@@ -12319,7 +12319,7 @@ int BlueStore::_remove_collection(TransContext *txc, const coll_t &cid,
     // then check if all of them are marked as non-existent.
     // Bypass the check if returned number is greater than nonexistent_count
     r = _collection_list(c->get(), ghobject_t(), ghobject_t::get_max(),
-                         nonexistent_count + 1, &ls, &next);
+                         nonexistent_count + 1, &ls, &next, true);
     if (r >= 0) {
       bool exists = false; //ls.size() > nonexistent_count;
       for (auto it = ls.begin(); !exists && it < ls.end(); ++it) {
