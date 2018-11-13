@@ -2219,6 +2219,8 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
       tab.define_column("RD", TextTable::LEFT, TextTable::RIGHT);
       tab.define_column("WR_OPS", TextTable::LEFT, TextTable::RIGHT);
       tab.define_column("WR", TextTable::LEFT, TextTable::RIGHT);
+      tab.define_column("TUSED", TextTable::LEFT, TextTable::RIGHT);
+      tab.define_column("TOBJECTS", TextTable::LEFT, TextTable::RIGHT);
     } else {
       formatter->open_object_section("stats");
       formatter->open_array_section("pools");
@@ -2241,6 +2243,8 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
             << si_t(s.num_rd_kb << 10)
             << s.num_wr
             << si_t(s.num_wr_kb << 10)
+            << si_t(s.num_bytes_fast)
+            << s.num_objects_fast
             << TextTable::endrow;
       } else {
         formatter->open_object_section("pool");
@@ -2252,8 +2256,10 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
           cerr << "ERROR: lookup_pg_pool_name for name=" << pool_name
 	       << " returned " << pool_id << std::endl;
 	formatter->dump_int("size_bytes",s.num_bytes);
+	formatter->dump_int("size_bytes_tier",s.num_bytes_fast);
 	formatter->dump_int("size_kb", s.num_kb);
 	formatter->dump_int("num_objects", s.num_objects);
+	formatter->dump_int("num_objects_tier", s.num_objects_fast);
 	formatter->dump_int("num_object_clones", s.num_object_clones);
 	formatter->dump_int("num_object_copies", s.num_object_copies);
 	formatter->dump_int("num_objects_missing_on_primary", s.num_objects_missing_on_primary);

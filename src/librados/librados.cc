@@ -2543,6 +2543,8 @@ int librados::Rados::get_pool_stats(std::list<string>& v,
     pv.num_kb = SHIFT_ROUND_UP(sum->num_bytes, 10);
     pv.num_bytes = sum->num_bytes;
     pv.num_objects = sum->num_objects;
+    pv.num_bytes_fast = sum->num_bytes_fast;
+    pv.num_objects_fast = sum->num_objects_fast;
     pv.num_object_clones = sum->num_object_clones;
     pv.num_object_copies = sum->num_object_copies;
     pv.num_objects_missing_on_primary = sum->num_objects_missing_on_primary;
