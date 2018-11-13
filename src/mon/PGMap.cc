@@ -703,6 +703,8 @@ ceph_statfs PGMapDigest::get_statfs(OSDMap &osdmap,
     statfs.num_objects = pg_sum.stats.sum.num_objects;
   }
 
+  statfs.kb_fast = osd_sum.kb_fast;
+
   return statfs;
 }
 
