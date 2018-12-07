@@ -1866,7 +1866,7 @@ std::vector<Option> get_global_options() {
     .set_description(""),
 
     Option("osd_tier_force_writeback", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
-    .set_default(true)
+    .set_default(false)
     .set_description("force not to proxy write under writeback mode"),
 
     Option("osd_tier_default_cache_mode", Option::TYPE_STR, Option::LEVEL_ADVANCED)
