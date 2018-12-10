@@ -83,6 +83,8 @@ void usage(ostream& out)
 "   rmsnap <snap-name>               remove snap <snap-name>\n"
 "\n"
 "OBJECT COMMANDS\n"
+"   pin <obj-name>                   pin object in cache\n"
+"   unpin <obj-name>                 unpin object in cache\n"
 "   get <obj-name> [outfile]         fetch object\n"
 "   put <obj-name> [infile] [--offset offset]\n"
 "                                    write object with start offset (default:0)\n"
@@ -275,6 +277,19 @@ static int dump_data(std::string const &filename, bufferlist const &data)
   return r;
 }
 
+static int do_pin(IoCtx& io_ctx, const char* objname)
+{
+  ObjectWriteOperation op;
+  op.cache_pin();
+  return io_ctx.operate(objname, &op);
+}
+
+static int do_unpin(IoCtx& io_ctx, const char* objname)
+{
+  ObjectWriteOperation op;
+  op.cache_unpin();
+  return io_ctx.operate(objname, &op);
+}
 
 static int do_get(IoCtx& io_ctx, RadosStriper& striper,
 		  const char *objname, const char *outfile, unsigned op_size,
@@ -2437,6 +2452,20 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
            << " mtime " << t << ", size " << size
            << " on_fast " << on_fast
            << std::endl;
+    }
+  }
+  else if (strcmp(nargs[0], "pin") == 0) {
+    ret = do_pin(io_ctx, nargs[1]);
+    if (ret < 0) {
+      cerr << "err pin " << pool_name << "/" << nargs[1] << ": " << cpp_strerror(ret) << std::endl;
+      goto out;
+    }
+  }
+  else if (strcmp(nargs[0], "unpin") == 0) {
+    ret = do_unpin(io_ctx, nargs[1]);
+    if (ret < 0) {
+      cerr << "err unpin " << pool_name << "/" << nargs[1] << ": " << cpp_strerror(ret) << std::endl;
+      goto out;
     }
   }
   else if (strcmp(nargs[0], "get") == 0) {
