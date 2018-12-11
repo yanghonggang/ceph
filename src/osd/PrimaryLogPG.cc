@@ -2221,7 +2221,7 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
     uint32_t recency = op->may_write() ? 
                          pool.info.min_write_recency_for_promote :
                          pool.info.min_read_recency_for_promote; 
-    maybe_promote(obc, in_hit_set, recency, op->may_write());
+    maybe_promote(obc, in_hit_set, recency, op);
   }
 
   if (maybe_handle_cache(op,
@@ -2694,13 +2694,18 @@ PrimaryLogPG::cache_result_t PrimaryLogPG::maybe_handle_cache_detail(
 bool PrimaryLogPG::maybe_promote(ObjectContextRef obc,
                                  bool in_hit_set,
                                  uint32_t recency,
-                                 bool may_write)
+                                 OpRequestRef op)
 {
+  bool may_write = op->may_write();
+  bool pin = op->need_promote();
+
   dout(10) << __func__
           << " " << obc->obs.oi
           << ", in_hit_set " << in_hit_set
           << ", recency " << recency
+          << ", pin " << pin
           << dendl;
+
   if (obc->obs.oi.is_on_tier()) {
     osd->logger->inc(l_osd_op_cache_hit);
     if (may_write)
@@ -2713,6 +2718,14 @@ bool PrimaryLogPG::maybe_promote(ObjectContextRef obc,
   
   osd->logger->inc(l_osd_op_cache_miss);
 
+  if (pin) {
+    // force promotion when pin an object
+    dout(1) << __func__
+            << " " << obc->obs.oi
+            << " force promotion"
+            << dendl;
+    return agent_maybe_migrate(obc, true, may_write);
+  }
   switch (recency) {
   case 0:
     break;
@@ -6273,7 +6286,8 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
     case CEPH_OSD_OP_CACHE_PIN:
       tracepoint(osd, do_osd_op_pre_cache_pin, soid.oid.name.c_str(), soid.snap.val);
       if ((!pool.info.is_tier() ||
-	  pool.info.cache_mode == pg_pool_t::CACHEMODE_NONE)) {
+	  pool.info.cache_mode == pg_pool_t::CACHEMODE_NONE) &&
+          pool.info.cache_mode != pg_pool_t::CACHEMODE_LOCAL) {
         result = -EINVAL;
         dout(10) << " pin object is only allowed on the cache tier " << dendl;
         break;
@@ -6298,7 +6312,8 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
     case CEPH_OSD_OP_CACHE_UNPIN:
       tracepoint(osd, do_osd_op_pre_cache_unpin, soid.oid.name.c_str(), soid.snap.val);
       if ((!pool.info.is_tier() ||
-	  pool.info.cache_mode == pg_pool_t::CACHEMODE_NONE)) {
+	  pool.info.cache_mode == pg_pool_t::CACHEMODE_NONE) &&
+          pool.info.cache_mode != pg_pool_t::CACHEMODE_LOCAL) {
         result = -EINVAL;
         dout(10) << " pin object is only allowed on the cache tier " << dendl;
         break;
