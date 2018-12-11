@@ -15,6 +15,8 @@
 #include "test/librados/TestCase.h"
 #include "json_spirit/json_spirit.h"
 
+#include "common/Mutex.h"
+#include "common/Timer.h"
 #include "osd/HitSet.h"
 
 #include <errno.h>
@@ -5631,4 +5633,126 @@ TEST_F(LibRadosLocalTier, SnapClone) {
   }
   // cleanup
   ioctx.selfmanaged_snap_remove(snaps[0]);
+}
+
+TEST_F(LibRadosLocalTier, PinUnpin) {
+  // store to hdd by default
+  {
+    bufferlist inbl;
+    ASSERT_EQ(0, cluster.mon_command(set_pool_str(pool_name,
+                                       "cache_local_mode_default_fast", 0),
+      inbl, NULL, NULL));
+
+    ASSERT_EQ(0, cluster.mon_command(set_pool_str(pool_name,
+                                       "min_read_recency_for_promote", 200),
+      inbl, NULL, NULL));
+    ASSERT_EQ(0, cluster.mon_command(set_pool_str(pool_name,
+                                       "min_write_recency_for_promote", 200),
+      inbl, NULL, NULL));
+    ASSERT_EQ(0, cluster.mon_command(set_pool_str(pool_name,
+                                       "target_max_objects", 1000000),
+      inbl, NULL, NULL));
+    ASSERT_EQ(0, cluster.mon_command(set_pool_str(pool_name,
+                                       "cache_target_dirty_ratio", 1.0),
+      inbl, NULL, NULL));
+  }
+  // create object
+  {
+    bufferlist bl;
+    bl.append("hehe");
+    ObjectWriteOperation op;
+    op.write_full(bl);
+    ASSERT_EQ(0, ioctx.operate("haha", &op));
+    std::cout << "create object haha" << std::endl;
+  }
+  // wait for maps to settle
+  cluster.wait_for_latest_osdmap();
+  // pin
+  {
+    ObjectWriteOperation op;
+    op.cache_pin();
+    ASSERT_EQ(0, ioctx.operate("haha", &op));
+  }
+  // object should be promoted to ssd
+  {
+    NObjectIterator i = ioctx.nobjects_begin();
+    NObjectIterator end = ioctx.nobjects_end();
+    bool found = false;
+    for (; i != end; i++) {
+      if (i->get_oid() == "haha") {
+        ASSERT_EQ(true, i->is_on_fast());
+        found = true;
+        break;
+      }
+    }
+    ASSERT_EQ(true, found);
+  }
+  // trigger tier demote
+  {
+    bufferlist inbl;
+    ASSERT_EQ(0, cluster.mon_command(set_pool_str(pool_name,
+                                       "target_max_objects", 1),
+      inbl, NULL, NULL));
+    ASSERT_EQ(0, cluster.mon_command(set_pool_str(pool_name,
+                                       "cache_target_dirty_ratio", 0.001),
+      inbl, NULL, NULL));
+    std::cout << "wait for demote op ..." << std::endl;
+    sleep(8);
+  }
+  // object should still in tier
+  {
+    NObjectIterator i = ioctx.nobjects_begin();
+    NObjectIterator end = ioctx.nobjects_end();
+    bool found = false;
+    for (; i != end; i++) {
+      if (i->get_oid() == "haha") {
+        ASSERT_EQ(true, i->is_on_fast());
+        found = true;
+        break;
+      }
+    }
+    ASSERT_EQ(true, found);
+  }
+  // unpin 
+  {
+    ObjectWriteOperation op;
+    op.cache_unpin();
+    ASSERT_EQ(0, ioctx.operate("haha", &op));
+  }
+  // wait until object demote to hdd or timeout
+  {
+    Mutex st_lock("safe_timer_lock");
+    SafeTimer s_timer(g_ceph_context, st_lock);
+    utime_t inc(60, 0);
+    utime_t t = ceph_clock_now() + inc;
+    Context* fail_case = new FunctionContext(
+      [=](int r) {
+        std::cout << "wait for demote timeout: r = " << r << std::endl;
+        ASSERT_TRUE(false); 
+      });
+    st_lock.Lock();
+    s_timer.add_event_at(t, fail_case);
+    st_lock.Unlock();
+    while (true) {
+      NObjectIterator i = ioctx.nobjects_begin();
+      NObjectIterator end = ioctx.nobjects_end();
+      bool found = false;
+      for (; i != end; i++) {
+        if (i->get_oid() == "haha") {
+          ASSERT_EQ(true, i->is_on_fast());
+          found = true;
+          break;
+        }
+      }
+      if (found) {
+        std::cout << "object haha is demote to slow layer" << std::endl;
+        break;
+      }
+      std::cout << "sleep 5s before check again ..." << std::endl;
+      sleep(5);
+    }
+    st_lock.Lock();
+    s_timer.cancel_event(fail_case);
+    st_lock.Unlock();
+  }
 }
