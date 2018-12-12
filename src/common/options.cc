@@ -3330,7 +3330,7 @@ std::vector<Option> get_global_options() {
     .add_see_also("bluestore_block_wal_size"),
 
     Option("bluestore_block_fast_path", Option::TYPE_STR, Option::LEVEL_DEV)
-    .set_default("/dev/disk/by-partlabel/osd_fast_0")
+    .set_default("")
     .add_tag("mkfs")
     .set_description("Path to fast block device/file"),
 
