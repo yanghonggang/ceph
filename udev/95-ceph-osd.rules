@@ -48,6 +48,16 @@ ACTION=="change", SUBSYSTEM=="block", \
   ENV{ID_PART_ENTRY_TYPE}=="5ce17fce-4087-4169-b7ff-056cc58473f9", \
   OWNER="ceph", GROUP="ceph", MODE="660"
 
+# BLOCK.FAST_UUID #regular
+ACTION=="add", SUBSYSTEM=="block", \
+  ENV{DEVTYPE}=="partition", \
+  ENV{ID_PART_ENTRY_TYPE}=="d94afa1e-ba6d-45b0-b59c-a32a07bd5f10", \
+  OWNER:="ceph", GROUP:="ceph", MODE:="660", \
+  RUN+="/usr/sbin/ceph-disk --log-stdout -v trigger /dev/$name"
+ACTION=="change", SUBSYSTEM=="block", \
+  ENV{ID_PART_ENTRY_TYPE}=="d94afa1e-ba6d-45b0-b59c-a32a07bd5f10", \
+  OWNER="ceph", GROUP="ceph", MODE="660"
+
 # LOCKBOX_UUID
 ACTION=="add", SUBSYSTEM=="block", \
   ENV{DEVTYPE}=="partition", \
@@ -103,6 +113,15 @@ ACTION=="change", SUBSYSTEM=="block", \
   ENV{ID_PART_ENTRY_TYPE}=="01b41e1b-002a-453c-9f17-88793989ff8f", \
   OWNER="ceph", GROUP="ceph", MODE="660"
 
+# MPATH_BLOCK.FAST_UUID # mpath
+ACTION=="add", SUBSYSTEM=="block", \
+  ENV{ID_PART_ENTRY_TYPE}=="27ff17c9-e3f7-4495-9a1b-d876236dac28", \
+  OWNER:="ceph", GROUP:="ceph", MODE:="660", \
+  RUN+="/usr/sbin/ceph-disk --log-stdout -v trigger /dev/$name"
+ACTION=="change", SUBSYSTEM=="block", \
+  ENV{ID_PART_ENTRY_TYPE}=="27ff17c9-e3f7-4495-9a1b-d876236dac28", \
+  OWNER="ceph", GROUP="ceph", MODE="660"
+
 # MPATH_BLOCK_UUID
 ACTION=="add", SUBSYSTEM=="block", \
   ENV{ID_PART_ENTRY_TYPE}=="7f4a666a-16f3-47a2-8445-152ef4d03f6c", \
@@ -152,6 +171,16 @@ ACTION=="change", SUBSYSTEM=="block", \
   ENV{ID_PART_ENTRY_TYPE}=="306e8683-4fe2-4330-b7c0-00a917c16966", \
   OWNER="ceph", GROUP="ceph", MODE="660"
 
+# DMCRYPT_BLOCK.FAST_UUID # plain
+ACTION=="add" SUBSYSTEM=="block", \
+  ENV{DEVTYPE}=="partition", \
+  ENV{ID_PART_ENTRY_TYPE}=="1629808c-2a18-458a-afe6-3487b7198b32", \
+  OWNER:="ceph", GROUP:="ceph", MODE:="660", \
+  RUN+="/usr/sbin/ceph-disk --log-stdout -v trigger /dev/$name"
+ACTION=="change", SUBSYSTEM=="block", \
+  ENV{ID_PART_ENTRY_TYPE}=="1629808c-2a18-458a-afe6-3487b7198b32", \
+  OWNER="ceph", GROUP="ceph", MODE="660"
+
 # DMCRYPT_LUKS_JOURNAL_UUID
 ACTION=="add" SUBSYSTEM=="block", \
   ENV{DEVTYPE}=="partition", \
@@ -190,6 +219,16 @@ ACTION=="add" SUBSYSTEM=="block", \
   RUN+="/usr/sbin/ceph-disk --log-stdout -v trigger /dev/$name"
 ACTION=="change", SUBSYSTEM=="block", \
   ENV{ID_PART_ENTRY_TYPE}=="86a32090-3647-40b9-bbbd-38d8c573aa86", \
+  OWNER="ceph", GROUP="ceph", MODE="660"
+
+# DMCRYPT_LUKS_BLOCK.FAST_UUID # luks
+ACTION=="add" SUBSYSTEM=="block", \
+  ENV{DEVTYPE}=="partition", \
+  ENV{ID_PART_ENTRY_TYPE}=="609575ef-f208-42ce-8534-336c211d066e", \
+  OWNER:="ceph", GROUP:="ceph", MODE:="660", \
+  RUN+="/usr/sbin/ceph-disk --log-stdout -v trigger /dev/$name"
+ACTION=="change", SUBSYSTEM=="block", \
+  ENV{ID_PART_ENTRY_TYPE}=="609575ef-f208-42ce-8534-336c211d066e", \
   OWNER="ceph", GROUP="ceph", MODE="660"
 
 # DMCRYPT_OSD_UUID

@@ -70,6 +70,11 @@ PTYPE = {
             'ready': '5ce17fce-4087-4169-b7ff-056cc58473f9',
             'tobe': '5ce17fce-4087-4169-b7ff-056cc58472be',
         },
+        'block.fast': {
+            # identical because creating a block is atomic
+            'ready': 'd94afa1e-ba6d-45b0-b59c-a32a07bd5f10',
+            'tobe': 'd94afa1e-ba6d-45b0-b59c-a32a07bd5f10',
+        },
         'osd': {
             'ready': '4fbd7e29-9d25-41b8-afd0-062c0ceff05d',
             'tobe': '89c57f98-2fe5-4dc0-89c1-f3ad0ceff2be',
@@ -96,6 +101,10 @@ PTYPE = {
             'ready': '86a32090-3647-40b9-bbbd-38d8c573aa86',
             'tobe': '92dad30f-175b-4d40-a5b0-5c0a258b42be',
         },
+        'block.fast': {
+            'ready': '609575ef-f208-42ce-8534-336c211d066e',
+            'tobe': 'eb44f699-11fe-4478-ac45-41bd9adfab7e',
+        },
         'osd': {
             'ready': '4fbd7e29-9d25-41b8-afd0-35865ceff05d',
             'tobe': '89c57f98-2fe5-4dc0-89c1-5ec00ceff2be',
@@ -118,6 +127,10 @@ PTYPE = {
             'ready': '306e8683-4fe2-4330-b7c0-00a917c16966',
             'tobe': 'f2d89683-a621-4063-964a-eb1f7863a2be',
         },
+        'block.fast': {
+            'ready': '1629808c-2a18-458a-afe6-3487b7198b32',
+            'tobe': '60c88ad2-7c16-46a9-9a82-5d374b53c75b',
+        },
         'osd': {
             'ready': '4fbd7e29-9d25-41b8-afd0-5ec00ceff05d',
             'tobe': '89c57f98-2fe5-4dc0-89c1-5ec00ceff2be',
@@ -139,6 +152,10 @@ PTYPE = {
         'block.wal': {
             'ready': '01b41e1b-002a-453c-9f17-88793989ff8f',
             'tobe': '01b41e1b-002a-453c-9f17-88793989f2be',
+        },
+        'block.fast': {
+            'ready': '27ff17c9-e3f7-4495-9a1b-d876236dac28',
+            'tobe': 'c29ecafa-af48-4976-9921-462873b2927d',
         },
         'osd': {
             'ready': '4fbd7e29-8ae0-4982-bf9d-5a8d867af560',
@@ -2138,6 +2155,7 @@ class PrepareBluestore(Prepare):
         self.block = PrepareBluestoreBlock(args)
         self.blockdb = PrepareBluestoreBlockDB(args)
         self.blockwal = PrepareBluestoreBlockWAL(args)
+        self.blockfast = PrepareBluestoreBlockFast(args)
 
     @staticmethod
     def parser():
@@ -2163,6 +2181,7 @@ class PrepareBluestore(Prepare):
             PrepareBluestoreBlock.parser(),
             PrepareBluestoreBlockDB.parser(),
             PrepareBluestoreBlockWAL.parser(),
+            PrepareBluestoreBlockFast.parser(),
         ]
 
     def _prepare(self):
@@ -2173,13 +2192,15 @@ class PrepareBluestore(Prepare):
             to_prepare_list.append(self.blockdb)
         if getattr(self.data.args, 'block.wal'):
             to_prepare_list.append(self.blockwal)
+        if getattr(self.data.args, 'block.fast'):
+            to_prepare_list.append(self.blockfast)
         to_prepare_list.append(self.block)
         self.data.prepare(*to_prepare_list)
 
 
 class Space(object):
 
-    NAMES = ('block', 'journal', 'block.db', 'block.wal')
+    NAMES = ('block', 'journal', 'block.db', 'block.wal', 'block.fast')
 
 
 class PrepareSpace(object):
@@ -2584,6 +2605,40 @@ class PrepareBluestoreBlockWAL(PrepareSpace):
         )
         return parser
 
+class PrepareBluestoreBlockFast(PrepareSpace):
+
+    def __init__(self, args):
+        self.name = 'block.fast'
+        super(PrepareBluestoreBlockFast, self).__init__(args)
+
+    def get_space_size(self):
+        fast_size = get_conf(
+                      cluster=self.args.cluster,
+                      variable='bluestore_block_fast_size',
+        )
+        if fast_size is None:
+            return 1024 # MB
+        else:
+            return int(fast_size) / 1048576 # MB
+    def desired_partition_number(self):
+        if getattr(self.args, 'block.fast') == self.args.data:
+            num = 5
+        else:
+            num = 0
+        return num
+
+    def wants_space(self):
+        return False
+
+    @staticmethod
+    def parser():
+        parser = PrepareSpace.parser('block.fast', positional=False)
+        parser.add_argument(
+            '--block.fast',
+            metavar='BLOCKFAST',
+            help='path to the device or file for bluestore block.fast',
+        )
+        return parser
 
 class CryptHelpers(object):
 
