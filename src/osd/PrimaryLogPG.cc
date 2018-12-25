@@ -10053,6 +10053,7 @@ ObjectContextRef PrimaryLogPG::get_object_context(
     (pg_log.get_log().objects.count(soid) &&
       pg_log.get_log().objects.find(soid)->second->op ==
       pg_log_entry_t::LOST_REVERT));
+  dout(10) << __func__ << " , soid " << soid << dendl;
   ObjectContextRef obc = object_contexts.lookup(soid);
   osd->logger->inc(l_osd_object_ctx_cache_total);
   if (obc) {
@@ -10105,6 +10106,7 @@ ObjectContextRef PrimaryLogPG::get_object_context(
 
     assert(oi.soid.pool == (int64_t)info.pgid.pool());
 
+    dout(10) << __func__ << ", oi.soid " << oi.soid << dendl;
     obc = object_contexts.lookup_or_create(oi.soid);
     obc->destructor_callback = new C_PG_ObjectContext(this, obc.get());
     obc->obs.oi = oi;
@@ -13264,6 +13266,10 @@ bool PrimaryLogPG::agent_work(int start_max, int agent_flush_quota)
   for (vector<hobject_t>::iterator p = ls.begin();
        p != ls.end();
        ++p) {
+    if (!p->is_on_fast()) {
+      dout(20) << __func__ << " skip (not on fast dev) " << *p << dendl;
+      continue;
+    }
     if (p->nspace == cct->_conf->osd_hit_set_namespace) {
       dout(20) << __func__ << " skip (hit set) " << *p << dendl;
       osd->logger->inc(l_osd_agent_skip);
@@ -13317,10 +13323,11 @@ bool PrimaryLogPG::agent_work(int start_max, int agent_flush_quota)
     }
 
     if (agent_state->evict_mode != TierAgentState::EVICT_MODE_IDLE) {
-      if (((pool.info.cache_mode != pg_pool_t::CACHEMODE_LOCAL) &&
-           agent_maybe_evict(obc, false)) ||
-          (p->is_on_fast() && agent_maybe_migrate(obc, false)))
-      ++started;
+      if ((pool.info.cache_mode != pg_pool_t::CACHEMODE_LOCAL) &&
+           agent_maybe_evict(obc, false))
+        ++started;
+      else if (p->is_on_fast() && agent_maybe_migrate(obc, false))
+        ++started;
     } else if (agent_state->flush_mode != TierAgentState::FLUSH_MODE_IDLE &&
              agent_flush_quota > 0 && agent_maybe_flush(obc)) {
       ++started;

@@ -355,10 +355,14 @@ int cmp(const hobject_t& l, const hobject_t& r)
     return -1;
   if (l.snap > r.snap)
     return 1;
+#if 0
+  // fast is used to read fast info from disk when objects_list_partial is
+  // called. DON'T use it anywhere else
   if ((int)l.fast > (int)r.fast)
     return 1;
   if ((int)l.fast < (int)r.fast)
     return -1;
+#endif
   return 0;
 }
 
