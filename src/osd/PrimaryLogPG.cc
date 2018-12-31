@@ -3478,8 +3478,9 @@ void PrimaryLogPG::execute_ctx(OpContext *ctx)
 				    ctx->user_at_version);
 	}
 	reply->add_flags(CEPH_OSD_FLAG_ACK | CEPH_OSD_FLAG_ONDISK);
-	dout(10) << " sending reply on " << *m << " " << reply << dendl;
         reply->set_result(ctx->rval);
+	dout(10) << " sending reply on " << *m << " " << reply
+                 << " , rval is " << ctx->rval << dendl;
 	osd->send_message_osd_client(reply, m->get_connection());
 	ctx->sent_reply = true;
 	ctx->op->mark_commit_sent();
@@ -9560,7 +9561,8 @@ void PrimaryLogPG::eval_repop(RepGather *repop)
   }
 }
 
-void PrimaryLogPG::issue_repop(RepGather *repop, OpContext *ctx)
+void PrimaryLogPG::issue_repop(RepGather *repop, OpContext *ctx,
+                               bool ignore_rval)
 {
   FUNCTRACE();
   const hobject_t& soid = ctx->obs->oi.soid;
@@ -9603,7 +9605,7 @@ void PrimaryLogPG::issue_repop(RepGather *repop, OpContext *ctx)
     ctx->obc,
     ctx->clone_obc,
     unlock_snapset_obc ? ctx->snapset_obc : ObjectContextRef(),
-    &ctx->rval);
+    ignore_rval ? nullptr : &ctx->rval);
   if (!(ctx->log.empty())) {
     assert(ctx->at_version >= projected_last_update);
     projected_last_update = ctx->at_version;
@@ -9710,7 +9712,7 @@ void PrimaryLogPG::simple_opc_submit(OpContextUPtr ctx)
 {
   RepGather *repop = new_repop(ctx.get(), ctx->obc, ctx->reqid.tid);
   dout(20) << __func__ << " " << repop << dendl;
-  issue_repop(repop, ctx.get());
+  issue_repop(repop, ctx.get(), true);
   eval_repop(repop);
   calc_trim_to();
   repop->put();

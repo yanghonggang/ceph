@@ -853,7 +853,7 @@ protected:
   void repop_all_applied(RepGather *repop);
   void repop_all_committed(RepGather *repop);
   void eval_repop(RepGather*);
-  void issue_repop(RepGather *repop, OpContext *ctx);
+  void issue_repop(RepGather *repop, OpContext *ctx, bool ignore_rval = false);
   RepGather *new_repop(
     OpContext *ctx,
     ObjectContextRef obc,
