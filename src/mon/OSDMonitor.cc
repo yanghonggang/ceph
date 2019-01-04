@@ -11100,7 +11100,7 @@ bool OSDMonitor::prepare_command_impl(MonOpRequestRef op,
     assert(p);
     {
       auto statfs = mon->pgservice->get_statfs(osdmap, pool_id);
-      if (!statfs.kb_fast) {
+      if ((mode == pg_pool_t::CACHEMODE_LOCAL) && !statfs.kb_fast) {
         ss << "no tier device available";
         err = -EINVAL;
         goto reply;
