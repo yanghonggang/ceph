@@ -13080,7 +13080,7 @@ void PrimaryLogPG::hit_set_persist()
   obc->ssc->snapset.head_exists = true;
   ctx->new_snapset = obc->ssc->snapset;
 
-  if (fast) {
+  if (fast && !cct->_conf->osd_hit_set_on_slow) {
     ctx->delta_stats.num_objects_fast++;
     ctx->delta_stats.num_bytes_fast += bl.length();
   }
