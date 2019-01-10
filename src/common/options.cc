@@ -1854,7 +1854,7 @@ std::vector<Option> get_global_options() {
     .set_description(""),
 
     Option("osd_hit_set_on_slow", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
-    .set_default(false)
+    .set_default(true)
     .set_description("store hit set objects on slow dev by default"),
 
     Option("osd_tier_promote_max_objects_sec", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
