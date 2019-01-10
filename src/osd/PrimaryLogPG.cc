@@ -13485,7 +13485,15 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote,
     osd->logger->inc(l_osd_agent_skip);
     return false;
   }
-
+  if (!obc->obs.oi.watchers.empty()) {
+    dout(15) << __func__ << " skip (watchers) " << obc->obs.oi << dendl;
+    osd->logger->inc(l_osd_agent_skip);
+    return false;
+  }
+  if (soid.nspace == cct->_conf->osd_hit_set_namespace) {
+    dout(15) << __func__ << " skip (hit set) " << obc->obs.oi << dendl;
+    return false;
+  }
   // NOTE:
   // we don't need to wait for all clone objects are demoted
    
