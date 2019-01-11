@@ -76,6 +76,16 @@ static ostream& _prefix(std::ostream *_dout, T *pg) {
 
 #include <errno.h>
 
+#ifdef PG_DEBUG_FAST
+#define debug_fast_add fast_add
+#define debug_fast_remove fast_remove
+#define debug_fast_dump fast_dump
+#else
+#define debug_fast_add(...)
+#define debug_fast_remove(...)
+#define debug_fast_dump(...)
+#endif
+
 MEMPOOL_DEFINE_OBJECT_FACTORY(PrimaryLogPG, replicatedpg, osd);
 
 PGLSFilter::PGLSFilter() : cct(nullptr)
@@ -3921,8 +3931,10 @@ int PrimaryLogPG::trim_object(
         ctx->delta_stats.num_bytes_fast += snapset.get_clone_bytes(*n);
     }
     ctx->delta_stats.num_objects--;
-    if (coi.is_on_tier())
+    if (coi.is_on_tier()) {
       ctx->delta_stats.num_objects_fast--;
+      debug_fast_remove(coi.soid);
+    }
     if (coi.is_dirty())
       ctx->delta_stats.num_objects_dirty--;
     if (coi.is_omap())
@@ -4028,6 +4040,7 @@ int PrimaryLogPG::trim_object(
       ctx->delta_stats.num_objects--;
       if (oi.is_on_tier()) {
         ctx->delta_stats.num_objects_fast--;
+        debug_fast_remove(oi.soid);
       }
       if (oi.is_dirty()) {
 	ctx->delta_stats.num_objects_dirty--;
@@ -4608,8 +4621,10 @@ void PrimaryLogPG::maybe_create_new_object(
       dout(10) << __func__ << " " << agent_state->get_evict_mode_name()
               << " " << obs.oi
               << dendl;
-    if (!ignore_transaction && obs.oi.is_on_tier())
+    if (!ignore_transaction && obs.oi.is_on_tier()) {
       ctx->delta_stats.num_objects_fast++;
+      debug_fast_add(obs.oi.soid);
+    }
   } else if (obs.oi.is_whiteout()) {
     dout(10) << __func__ << " clearing whiteout on " << obs.oi.soid << dendl;
     ctx->new_obs.oi.clear_flag(object_info_t::FLAG_WHITEOUT);
@@ -5906,9 +5921,11 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
           if (oi.alloc_hint_flags & CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER) {
             ctx->delta_stats.num_bytes_fast -= oi.size;
             ctx->delta_stats.num_objects_fast--;
+            debug_fast_remove(soid);
           } else {
             ctx->delta_stats.num_bytes_fast += oi.size;
             ctx->delta_stats.num_objects_fast++;
+            debug_fast_add(soid);
           }
         }
         // Note: set alloc_hint_flag before call maybe_create_new_object()
@@ -7131,8 +7148,10 @@ inline int PrimaryLogPG::_delete_oid(
 
   // delete the head
   ctx->delta_stats.num_objects--;
-  if (oi.is_on_tier())
+  if (oi.is_on_tier()) {
     ctx->delta_stats.num_objects_fast--;
+    debug_fast_remove(oi.soid);
+  }
   if (soid.is_snap())
     ctx->delta_stats.num_object_clones--;
   if (oi.is_whiteout()) {
@@ -7425,8 +7444,10 @@ void PrimaryLogPG::make_writeable(OpContext *ctx)
     _make_clone(ctx, ctx->op_t.get(), ctx->clone_obc, soid, coid, snap_oi);
 
     ctx->delta_stats.num_objects++;
-    if (snap_oi->is_on_tier())
+    if (snap_oi->is_on_tier()) {
       ctx->delta_stats.num_objects_fast++;
+      debug_fast_add(snap_oi->soid);
+    }
     if (snap_oi->is_dirty()) {
       ctx->delta_stats.num_objects_dirty++;
       osd->logger->inc(l_osd_tier_dirty);
@@ -10430,6 +10451,7 @@ void PrimaryLogPG::add_object_context_to_pg_stat(ObjectContextRef obc, pg_stat_t
     stat.num_objects++;
     if (oi.is_on_tier()) {
       stat.num_objects_fast++;
+      debug_fast_add(oi.soid);
     }
   }
   if (oi.is_dirty())
@@ -13083,6 +13105,7 @@ void PrimaryLogPG::hit_set_persist()
   if (fast && !cct->_conf->osd_hit_set_on_slow) {
     ctx->delta_stats.num_objects_fast++;
     ctx->delta_stats.num_bytes_fast += bl.length();
+    debug_fast_add(obc->obs.oi.soid);
   }
   ctx->delta_stats.num_objects++;
   ctx->delta_stats.num_objects_hit_set_archive++;
@@ -13153,6 +13176,7 @@ void PrimaryLogPG::hit_set_trim(OpContextUPtr &ctx, unsigned max)
     if (obc->obs.oi.is_on_tier()) {
       --ctx->delta_stats.num_objects_fast;
       ctx->delta_stats.num_bytes_fast -= obc->obs.oi.size;
+      debug_fast_remove(oid);
     }
     --ctx->delta_stats.num_objects_hit_set_archive;
     ctx->delta_stats.num_bytes -= obc->obs.oi.size;
@@ -13595,12 +13619,14 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote,
     info.stats.stats.sum.num_promote++;
     ctx->delta_stats.num_promote_kb += SHIFT_ROUND_UP(obc->obs.oi.size, 10);
     oi.set_on_tier();
+    debug_fast_add(soid);
   } else {
     assert(oi.is_on_tier());
     ctx->delta_stats.num_bytes_fast -= oi.size;
     ctx->delta_stats.num_objects_fast--;
     ctx->delta_stats.num_evict_kb += SHIFT_ROUND_UP(obc->obs.oi.size, 10);
     oi.clear_on_tier();
+    debug_fast_remove(soid);
     info.stats.stats.sum.num_evict++;
   }
   t->set_alloc_hint(soid, oi.expected_object_size, oi.expected_write_size,
@@ -14349,6 +14375,7 @@ void PrimaryLogPG::scrub_snapshot_metadata(
       }
       if (oi->is_on_tier()) {
         stat.num_objects_fast++;
+        debug_fast_add(soid);
       }
       if (soid.nspace == cct->_conf->osd_hit_set_namespace)
 	stat.num_bytes_hit_set_archive += oi->size;
@@ -14800,7 +14827,7 @@ void PrimaryLogPG::_scrub_finish()
 		      << scrub_cstat.sum.num_bytes_fast << "/" << info.stats.stats.sum.num_bytes_fast << " fast bytes, "
 		      << scrub_cstat.sum.num_bytes_hit_set_archive << "/" << info.stats.stats.sum.num_bytes_hit_set_archive << " hit_set_archive bytes.";
     ++scrubber.shallow_errors;
-
+    debug_fast_dump();
     if (repair) {
       ++scrubber.fixed;
       info.stats.stats = scrub_cstat;

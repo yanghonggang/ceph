@@ -180,6 +180,31 @@ void PG::put(const char* tag)
     delete this;
 }
 
+#ifdef PG_DEBUG_FAST
+void PG::fast_add(const hobject_t& o)
+{
+  dout(15) << __func__ << ": " << info.pgid << "/" << o << dendl;
+  BackTrace bt(0);
+  stringstream ss;
+  bt.print(ss);
+  assert(!_fast_nums.count(o));
+  _fast_nums.insert(make_pair(o, ss.str()));
+}
+void PG::fast_remove(const hobject_t& o)
+{
+  dout(15) << __func__ << ": " << info.pgid << "/" << o << dendl;
+  assert(_fast_nums.count(o));
+  _fast_nums.erase(o);
+}
+void PG::fast_dump()
+{
+  dout(0) << __func__ << ": " << info.pgid << dendl;
+  for (const auto i : _fast_nums) {
+    dout(0) << " " << i << dendl;
+  }
+}
+#endif
+
 #ifdef PG_DEBUG_REFS
 uint64_t PG::get_with_id()
 {
@@ -8501,3 +8526,4 @@ void intrusive_ptr_release(PG *pg) { pg->put("intptr"); }
   uint64_t get_with_id(PG *pg) { return pg->get_with_id(); }
   void put_with_id(PG *pg, uint64_t id) { return pg->put_with_id(id); }
 #endif
+
