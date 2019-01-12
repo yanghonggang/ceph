@@ -2725,7 +2725,14 @@ bool PrimaryLogPG::maybe_promote(ObjectContextRef obc,
 
     return false;
   }
-  
+
+  if (!obc->obs.exists) {
+    dout(10) << __func__
+             << " " << obc->obs.oi
+             << " not exist, skip"
+             << dendl;
+    return false;
+  } 
   osd->logger->inc(l_osd_op_cache_miss);
 
   if (pin) {
