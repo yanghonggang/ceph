@@ -57,7 +57,8 @@ using namespace std;
 
 //#define DEBUG_RECOVERY_OIDS   // track set of recovering oids explicitly, to find counting bugs
 
-#define PG_DEBUG_FAST
+// define this macro to debug fast object counter
+//#define PG_DEBUG_FAST
 
 class OSD;
 class OSDService;
