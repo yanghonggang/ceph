@@ -437,9 +437,26 @@ def cluster(ctx, config):
     devs_to_clean = {}
     remote_to_roles_to_devs = {}
     remote_to_roles_to_journals = {}
+    remote_reserved_dev = {}
     osds = ctx.cluster.only(teuthology.is_type('osd', cluster_name))
     for remote, roles_for_host in osds.remotes.iteritems():
-        devs = teuthology.get_scratch_devices(remote)
+        devs_all = teuthology.get_scratch_devices_detail(remote)
+        osds_ = teuthology.cluster_roles_of_type(roles_for_host, 'osd', cluster_name)
+        osds_size = 0
+        for o in osds_:
+            osds_size += 1
+        # resort dev list, hdd on the left side, ssd on the right side
+        devs = [i['dev'] for i in devs_all if not i['ssd']]
+        devs += [i['dev'] for i in devs_all if i['ssd']]
+        if osds_size < len(devs):
+            remote_reserved_dev[remote] = [i for i in devs_all if i['dev'] == devs[-1]]
+            devs_all = devs_all[:-1]
+            log.info('reserve {} as fast dev'.format(remote_reserved_dev[remote]))
+        else:
+            remote_reserved_dev[remote] = None
+        log.info('devs_all is {}'.format(devs_all))
+        devs = [i['dev'] for i in devs_all if not i['ssd']]
+        devs += [i['dev'] for i in devs_all if i['ssd']]
         roles_to_devs = {}
         roles_to_journals = {}
         if config.get('fs'):
@@ -553,6 +570,14 @@ def cluster(ctx, config):
     if not 'global' in conf:
         conf['global'] = {}
     conf['global']['fsid'] = fsid
+    # FIXME: this is argly
+    block_fast = False
+    if 'osd' in conf:
+        if 'bluestore block fast path' in conf['osd']:
+            if conf['osd']['bluestore block fast path'] == '/dev/disk/by-partlabel/osd_fast_$id':
+                # also bluestore's block dev
+                conf['global']['bluestore block path'] = '/dev/disk/by-partlabel/osd_block_$id'
+                block_fast = True
 
     default_conf_path = '/etc/ceph/{cluster}.conf'.format(cluster=cluster_name)
     conf_path = config.get('conf_path', default_conf_path)
@@ -686,6 +711,45 @@ def cluster(ctx, config):
     for remote, roles_for_host in osds.remotes.iteritems():
         roles_to_devs = remote_to_roles_to_devs[remote]
         roles_to_journals = remote_to_roles_to_journals[remote]
+        reserved_dev = remote_reserved_dev[remote]
+        if block_fast:
+            id_s = []
+            for role in teuthology.cluster_roles_of_type(roles_for_host, 'osd', cluster_name):
+                _, _, id_ = teuthology.split_role(role)
+                id_s.append(id_)
+            num_partitions = len(roles_to_devs)
+            fast_dev = reserved_dev[0]
+            assert(fast_dev is not None), "One more dev is needed"
+            part_size = int(fast_dev['size']) / num_partitions
+            part_size /= 1024 * 1024 * 1024
+
+            remote.run(args=['sudo',
+                             'sgdisk',
+                             '--zap-all',
+                             fast_dev['dev']])
+            log.info('prepare fast dev: {}, part_size {}, num_partitions {}'.format(
+                     fast_dev['dev'], part_size, num_partitions))
+            j = 0
+            for i in xrange(1, num_partitions):
+                id_ = id_s[j]
+                j += 1
+                remote.run(args=['sudo',
+                                 'sgdisk',
+                                 '--new={}:0:+{}GB'.format(i, part_size),
+                                 '--change-name={}:osd_fast_{}'.format(i, id_),
+                                 '--partition-guid={}:$(uuidgen)'.format(i),
+                                 '--mbrtogpt',
+                                 '--',
+                                 fast_dev['dev']])
+            remote.run(args=['sudo',
+                             'sgdisk',
+                             '--largest-new={}'.format(num_partitions),
+                             '--change-name={}:osd_fast_{}'.format(num_partitions, id_s[j]),
+                             '--partition-guid={}:$(uuidgen)'.format(num_partitions),
+                             '--mbrtogpt',
+                             '--',
+                             fast_dev['dev']])
+            remote.run(args=['sudo', 'partx', fast_dev['dev']])
 
         for role in teuthology.cluster_roles_of_type(roles_for_host, 'osd', cluster_name):
             _, _, id_ = teuthology.split_role(role)
@@ -740,6 +804,31 @@ def cluster(ctx, config):
                     )
 
                 try:
+                    # create partitions before mkfs
+                    if block_fast:
+                        log.info('create partitions for {}'.format(dev))
+                        remote.run(args=['sudo',
+                                         'sgdisk',
+                                         '--zap-all',
+                                         dev])
+                        remote.run(args=['sudo',
+                                         'sgdisk',
+                                         '--new=1:0:+500MB',
+                                         '--partition-guid=1:$(uuidgen)',
+                                         '--mbrtogpt',
+                                         '--',
+                                         dev])
+                        remote.run(args=['sudo',
+                                         'sgdisk',
+                                         '--largest-new=2',
+                                         '--change-name=2:osd_block_%s' % (id_),
+                                         '--partition-guid=2:$(uuidgen)',
+                                         '--mbrtogpt',
+                                         '--',
+                                         dev])
+                        remote.run(args=['sudo', 'partx', dev])
+                        dev += '1'
+
                     remote.run(args=['yes', run.Raw('|')] + ['sudo'] + mkfs + [dev])
                 except run.CommandFailedError:
                     # Newer btfs-tools doesn't prompt for overwrite, use -f
