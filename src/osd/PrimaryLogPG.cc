@@ -14382,7 +14382,6 @@ void PrimaryLogPG::scrub_snapshot_metadata(
       }
       if (oi->is_on_tier()) {
         stat.num_objects_fast++;
-        debug_fast_add(soid);
       }
       if (soid.nspace == cct->_conf->osd_hit_set_namespace)
 	stat.num_bytes_hit_set_archive += oi->size;
