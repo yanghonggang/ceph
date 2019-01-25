@@ -14380,13 +14380,13 @@ void PrimaryLogPG::scrub_snapshot_metadata(
         if (oi->is_on_tier())
           stat.num_bytes_fast += oi->size;
       }
-      if (oi->is_on_tier()) {
-        stat.num_objects_fast++;
-      }
       if (soid.nspace == cct->_conf->osd_hit_set_namespace)
 	stat.num_bytes_hit_set_archive += oi->size;
 
       if (!soid.is_snapdir()) {
+        if (oi->is_on_tier()) {
+          stat.num_objects_fast++;
+        }
 	if (oi->is_dirty())
 	  ++stat.num_objects_dirty;
 	if (oi->is_whiteout())
