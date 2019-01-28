@@ -181,13 +181,27 @@ void PG::put(const char* tag)
 }
 
 #ifdef PG_DEBUG_FAST
-void PG::fast_add(const hobject_t& o)
+void PG::fast_add(const hobject_t& o, const char* func, int line)
 {
-  dout(15) << __func__ << ": " << info.pgid << "/" << o << dendl;
+  dout(15) << __func__ << ": " << info.pgid
+           << "/" << o
+           << ", from func " << func
+           << ", line " << line
+           << dendl;
   BackTrace bt(0);
   stringstream ss;
   bt.print(ss);
-  assert(!_fast_nums.count(o));
+  ss << "\n From "
+     << " func= " << func
+     << ", line= " << line;
+  if (_fast_nums.count(o)) {
+    derr << __func__ << ">>>> Dump previous stack: "
+         << _fast_nums[o]
+         <<  ">>>> Dump current stack: "
+         << ss.str()
+         << dendl;
+    assert(0 == "Duplicated fast_add()");
+  }
   _fast_nums.insert(make_pair(o, ss.str()));
 }
 void PG::fast_remove(const hobject_t& o)

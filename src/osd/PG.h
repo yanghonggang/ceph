@@ -340,7 +340,7 @@ public:
   void dump_live_ids();
 #endif
 #ifdef PG_DEBUG_FAST
-  void fast_add(const hobject_t& o);
+  void fast_add(const hobject_t& o, const char* func, int line);
   void fast_remove(const hobject_t& o);
   void fast_dump();
 #endif

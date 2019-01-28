@@ -77,7 +77,7 @@ static ostream& _prefix(std::ostream *_dout, T *pg) {
 #include <errno.h>
 
 #ifdef PG_DEBUG_FAST
-#define debug_fast_add fast_add
+#define debug_fast_add(soid) fast_add(soid, __func__, __LINE__)
 #define debug_fast_remove fast_remove
 #define debug_fast_dump fast_dump
 #else
