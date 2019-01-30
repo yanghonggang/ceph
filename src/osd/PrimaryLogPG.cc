@@ -2228,10 +2228,14 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
   }
 
   if ((pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL) && obc.get()) {
-    uint32_t recency = op->may_write() ? 
-                         pool.info.min_write_recency_for_promote :
-                         pool.info.min_read_recency_for_promote; 
-    maybe_promote(obc, in_hit_set, recency, op);
+    if (m->ops[0].op.op != CEPH_OSD_OP_DELETE) {
+      uint32_t recency = op->may_write() ? 
+                           pool.info.min_write_recency_for_promote :
+                           pool.info.min_read_recency_for_promote; 
+      maybe_promote(obc, in_hit_set, recency, op);
+    } else {
+      dout(20) << __func__ << ": skip CEPH_OSD_OP_DELETE, don't promote" << dendl;
+    }
   }
 
   if (maybe_handle_cache(op,
