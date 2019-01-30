@@ -14842,6 +14842,9 @@ void PrimaryLogPG::_scrub_finish()
 		      << scrub_cstat.sum.num_bytes_hit_set_archive << "/" << info.stats.stats.sum.num_bytes_hit_set_archive << " hit_set_archive bytes.";
     ++scrubber.shallow_errors;
     debug_fast_dump();
+    if (cct->_conf->osd_scrub_mismatch_core) {
+      assert(0 == "osd_scrub_mismatch_core");
+    }
     if (repair) {
       ++scrubber.fixed;
       info.stats.stats = scrub_cstat;

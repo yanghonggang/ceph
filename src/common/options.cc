@@ -2575,6 +2575,10 @@ std::vector<Option> get_global_options() {
     .set_default(2_hr)
     .set_description(""),
 
+    Option("osd_scrub_mismatch_core", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+    .set_default(false)
+    .set_description("core when mismatch encountered"),
+
     Option("osd_class_dir", Option::TYPE_STR, Option::LEVEL_ADVANCED)
     .set_default(CEPH_LIBDIR "/rados-classes")
     .set_description(""),
