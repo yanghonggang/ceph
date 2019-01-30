@@ -7175,6 +7175,7 @@ inline int PrimaryLogPG::_delete_oid(
   if ((legacy || snapset.is_legacy()) && soid.is_head()) {
     snapset.head_exists = false;
   }
+  oi.clear_on_tier();
   obs.exists = false;
   return 0;
 }
