@@ -4628,7 +4628,7 @@ void PrimaryLogPG::maybe_create_new_object(
       dout(10) << __func__ << " " << agent_state->get_evict_mode_name()
               << " " << obs.oi
               << dendl;
-    if (!ignore_transaction && obs.oi.is_on_tier()) {
+    if (obs.oi.is_on_tier()) {
       ctx->delta_stats.num_objects_fast++;
       debug_fast_add(obs.oi.soid);
     }
