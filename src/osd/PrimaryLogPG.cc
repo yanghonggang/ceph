@@ -13507,6 +13507,11 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote,
     return false;
   }
 
+  if (scrubber.write_blocked_by_scrub(obc->obs.oi.soid)) {
+    dout(10) << __func__ << "skip (scrubbing) " << obc->obs.oi << dendl;
+    osd->logger->inc(l_osd_agent_skip);
+    return false;
+  }
   if (obc->is_blocked()) {
     dout(15) << __func__ << " skip (blocked) " << obc->obs.oi << dendl;
     osd->logger->inc(l_osd_agent_skip);
