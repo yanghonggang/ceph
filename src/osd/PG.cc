@@ -1917,7 +1917,12 @@ bool PG::op_has_sufficient_caps(OpRequestRef& op)
 			     op->need_read_cap(),
 			     op->need_write_cap(),
 			     op->classes());
-
+  entity_name_t source = req->get_source();
+  bool migration_op = (source.is_osd() && (source.num() == pg_whoami.osd));
+  if (migration_op) {
+    cap = true;
+    dout(10) << __func__ << " migration op from osd myself" << dendl;
+  }
   dout(20) << "op_has_sufficient_caps "
            << "session=" << session
            << " pool=" << pool.id << " (" << pool.name
@@ -1926,6 +1931,7 @@ bool PG::op_has_sufficient_caps(OpRequestRef& op)
 	   << " need_read_cap=" << op->need_read_cap()
 	   << " need_write_cap=" << op->need_write_cap()
 	   << " classes=" << op->classes()
+	   << " migration_op=" << migration_op
 	   << " -> " << (cap ? "yes" : "NO")
 	   << dendl;
   return cap;
@@ -5783,7 +5789,11 @@ ostream& operator<<(ostream& out, const PG& pg)
 bool PG::can_discard_op(OpRequestRef& op)
 {
   const MOSDOp *m = static_cast<const MOSDOp*>(op->get_req());
-  if (cct->_conf->osd_discard_disconnected_ops && OSD::op_is_discardable(m)) {
+  entity_name_t source = m->get_source();
+  bool migration_op = (source.is_osd() && (source.num() == pg_whoami.osd));
+  if (cct->_conf->osd_discard_disconnected_ops &&
+      !migration_op &&
+      OSD::op_is_discardable(m)) {
     dout(20) << " discard " << *m << dendl;
     return true;
   }

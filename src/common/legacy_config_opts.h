@@ -954,6 +954,7 @@ OPTION(osd_bench_duration, OPT_U32) // duration of 'osd bench', capped at 30s to
 OPTION(osd_blkin_trace_all, OPT_BOOL) // create a blkin trace for all osd requests
 OPTION(osdc_blkin_trace_all, OPT_BOOL) // create a blkin trace for all objecter requests
 
+OPTION(osd_async_migration, OPT_BOOL) // queue a new set alloc hint request other than simple op to migrate object
 OPTION(osd_discard_disconnected_ops, OPT_BOOL)
 
 OPTION(memstore_device_bytes, OPT_U64)

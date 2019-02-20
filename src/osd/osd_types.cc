@@ -6010,7 +6010,8 @@ ostream& operator<<(ostream& out, const OSDOp& op)
       break;
     case CEPH_OSD_OP_SETALLOCHINT:
       out << " object_size " << op.op.alloc_hint.expected_object_size
-          << " write_size " << op.op.alloc_hint.expected_write_size;
+          << " write_size " << op.op.alloc_hint.expected_write_size
+          << " flags " << op.op.flags;
       break;
     case CEPH_OSD_OP_READ:
     case CEPH_OSD_OP_SPARSE_READ:
