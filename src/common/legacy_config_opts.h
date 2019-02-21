@@ -639,6 +639,7 @@ OPTION(osd_hit_set_namespace, OPT_STR) // rados namespace for hit_set tracking
 OPTION(osd_hit_set_on_slow, OPT_BOOL) // store hit set on slow dev by default
 
 // conservative default throttling values
+OPTION(osd_tier_async_migration, OPT_BOOL) // queue a new set alloc hint request other than simple op to migrate object
 OPTION(osd_tier_promote_max_objects_sec, OPT_U64)
 OPTION(osd_tier_promote_max_bytes_sec, OPT_U64)
 
@@ -954,7 +955,6 @@ OPTION(osd_bench_duration, OPT_U32) // duration of 'osd bench', capped at 30s to
 OPTION(osd_blkin_trace_all, OPT_BOOL) // create a blkin trace for all osd requests
 OPTION(osdc_blkin_trace_all, OPT_BOOL) // create a blkin trace for all objecter requests
 
-OPTION(osd_async_migration, OPT_BOOL) // queue a new set alloc hint request other than simple op to migrate object
 OPTION(osd_discard_disconnected_ops, OPT_BOOL)
 
 OPTION(memstore_device_bytes, OPT_U64)

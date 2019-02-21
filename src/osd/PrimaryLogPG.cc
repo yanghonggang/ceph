@@ -5944,10 +5944,14 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
             ctx->delta_stats.num_bytes_fast -= oi.size;
             ctx->delta_stats.num_objects_fast--;
             debug_fast_remove(soid);
+
+            ctx->delta_stats.num_evict_kb += SHIFT_ROUND_UP(oi.size, 10);
           } else {
             ctx->delta_stats.num_bytes_fast += oi.size;
             ctx->delta_stats.num_objects_fast++;
             debug_fast_add(soid);
+
+            ctx->delta_stats.num_promote_kb += SHIFT_ROUND_UP(oi.size, 10);
           }
         }
         // Note: set alloc_hint_flag before call maybe_create_new_object()
@@ -13597,7 +13601,12 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote,
     } 
   }
 
-  if (cct->_conf->osd_async_migration) {
+  if (promote) {
+    info.stats.stats.sum.num_promote++;
+  } else {
+    info.stats.stats.sum.num_evict++;
+  }
+  if (cct->_conf->osd_tier_async_migration) {
     // queue a set alloc hint request
     int client_inc = 0; // XXXXX
     // don't want ack reply
@@ -13622,7 +13631,7 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote,
     m_->set_priority(cct->_conf->osd_client_op_priority);
     m_->set_reqid(osd_reqid_t()); // XXXX
     m_->ops = opv;
-    dout(10) << __func__ << "YHG: send a set alloc hint request to myself: "
+    dout(10) << __func__ << " send a set alloc hint request to myself: "
             << *m_ << dendl;
     osd->send_message_osd_cluster(pg_whoami.osd, m_, get_osdmap()->get_epoch());
 //    OpRequestRef op_ = osd->create_request(m_);
@@ -13681,7 +13690,6 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote,
     assert(!oi.is_on_tier());
     ctx->delta_stats.num_bytes_fast += oi.size;
     ctx->delta_stats.num_objects_fast++;
-    info.stats.stats.sum.num_promote++;
     ctx->delta_stats.num_promote_kb += SHIFT_ROUND_UP(obc->obs.oi.size, 10);
     oi.set_on_tier();
     debug_fast_add(soid);
@@ -13692,7 +13700,6 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote,
     ctx->delta_stats.num_evict_kb += SHIFT_ROUND_UP(obc->obs.oi.size, 10);
     oi.clear_on_tier();
     debug_fast_remove(soid);
-    info.stats.stats.sum.num_evict++;
   }
   t->set_alloc_hint(soid, oi.expected_object_size, oi.expected_write_size,
                     oi.alloc_hint_flags);

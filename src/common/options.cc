@@ -1857,6 +1857,10 @@ std::vector<Option> get_global_options() {
     .set_default(true)
     .set_description("store hit set objects on slow dev by default"),
 
+    Option("osd_tier_async_migration", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+    .set_default(true)
+    .set_description("send a new set alloc hint request when migration"),
+
     Option("osd_tier_promote_max_objects_sec", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
     .set_default(25)
     .set_description(""),
@@ -3096,10 +3100,6 @@ std::vector<Option> get_global_options() {
     Option("osd_blkin_trace_all", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
     .set_default(false)
     .set_description(""),
-
-    Option("osd_async_migration", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
-    .set_default(true)
-    .set_description("send a new set alloc hint request when migration"),
 
     Option("osdc_blkin_trace_all", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
     .set_default(false)
