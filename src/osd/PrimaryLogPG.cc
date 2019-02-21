@@ -13656,13 +13656,13 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote,
   object_info_t& oi = ctx->new_obs.oi;
 
   osd->agent_start_op(soid);
-  obc->start_block();
+  // obc->start_block();
 
   auto start = ceph_clock_now();
   ctx->register_on_success(
     [this, soid, oi, promote, read_promote, start, obc]() {
-      obc->stop_block();
-      kick_object_context_blocked(obc);
+      // obc->stop_block();
+      // kick_object_context_blocked(obc);
       osd->agent_finish_op(soid);
 
       if (promote) {
