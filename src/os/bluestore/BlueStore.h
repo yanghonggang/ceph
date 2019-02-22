@@ -2319,14 +2319,12 @@ public:
 		      const ghobject_t& start,
 		      const ghobject_t& end,
 		      int max,
-		      vector<ghobject_t> *ls,
-                      ghobject_t *next) override;
+		      vector<ghobject_t> *ls, ghobject_t *next) override;
   int collection_list(CollectionHandle &c,
 		      const ghobject_t& start,
 		      const ghobject_t& end,
 		      int max,
-		      vector<ghobject_t> *ls,
-                      ghobject_t *next) override;
+		      vector<ghobject_t> *ls, ghobject_t *next) override;
 
   int omap_get(
     const coll_t& cid,                ///< [in] Collection containing oid

@@ -1182,7 +1182,6 @@ void PrimaryLogPG::do_pg_op(OpRequestRef op)
         dout(10) << " pgnls pg=" << m->get_pg() << " count " << list_size << dendl;
 	// read into a buffer
         vector<hobject_t> sentries;
-
         pg_nls_response_t response;
 	try {
 	  ::decode(response.handle, bp);
@@ -2741,7 +2740,7 @@ bool PrimaryLogPG::maybe_promote(ObjectContextRef obc,
 
   if (pin) {
     // force promotion when pin an object
-    dout(1) << __func__
+    dout(15) << __func__
             << " " << obc->obs.oi
             << " force promotion"
             << dendl;

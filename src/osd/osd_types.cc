@@ -2027,9 +2027,9 @@ void object_stat_sum_t::encode(bufferlist& bl) const
 void object_stat_sum_t::decode(bufferlist::iterator& bl)
 {
   bool decode_finish = false;
-  DECODE_START(18, bl);
+  DECODE_START(17, bl);
 #if defined(CEPH_LITTLE_ENDIAN)
-  if (struct_v >= 18) {
+  if (struct_v >= 17) {
     // NOTE: this must match newest decode version
     bl.copy(sizeof(object_stat_sum_t), (char*)(&num_bytes));
     decode_finish = true;
@@ -2078,8 +2078,6 @@ void object_stat_sum_t::decode(bufferlist::iterator& bl)
     if (struct_v >= 17) {
       ::decode(num_bytes_fast, bl);
       ::decode(num_objects_fast, bl);
-    }
-    if (struct_v >= 18) {
       ::decode(num_promote_kb, bl);
     }
   }

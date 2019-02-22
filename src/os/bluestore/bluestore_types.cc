@@ -17,6 +17,9 @@
 #include "common/Checksummer.h"
 #include "include/stringify.h"
 
+// capture the first different alloc type
+// #define DEBUG_CAPTURE_ALLOC_MISMATCH
+
 void ExtentList::add_extents(int64_t start, int64_t count) {
   AllocExtent *last_extent = NULL;
   bool can_merge = false;
@@ -848,6 +851,7 @@ void bluestore_blob_t::allocated(uint32_t b_off, uint32_t length, const AllocExt
       start_it->length = tail;
     } 
   }
+#ifdef DEBUG_CAPTURE_ALLOC_MISMATCH
   // capture the first different alloc type
   {
     bool fast = false;
@@ -865,6 +869,7 @@ void bluestore_blob_t::allocated(uint32_t b_off, uint32_t length, const AllocExt
       }
     }
   }
+#endif
 }
 
 // cut it out of extents
