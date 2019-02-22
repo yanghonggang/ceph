@@ -3488,18 +3488,7 @@ void PrimaryLogPG::execute_ctx(OpContext *ctx)
       if (ctx->op)
 	log_op_stats(
 	  ctx);
-      if (m) {
-        entity_name_t source = m->get_source();
-        bool migration_op = (source.is_osd() && (source.num() == pg_whoami.osd));
-        if (migration_op) {
-          ctx->sent_reply = true;
-          dout(10) << __func__ << " don't need to send reply for migration_op "
-                   << ctx
-                   << " from myself "
-                   << ", rval is " << ctx->rval
-                   << dendl;
-        }
-      }
+
       if (m && !ctx->sent_reply) {
 	MOSDOpReply *reply = ctx->reply;
 	if (reply)
@@ -13595,40 +13584,6 @@ bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote,
               << dendl;
       return false;
     } 
-  }
-
-  if (cct->_conf->osd_async_migration) {
-    // queue a set alloc hint request
-    int client_inc = 0; // XXXXX
-    // don't want ack reply
-    int flags = (CEPH_OSD_FLAG_WRITE | CEPH_OSD_FLAG_READ);
-    spg_t spgid(info.pgid.pgid);
-    object_info_t& oi = obc->obs.oi;
-    vector<OSDOp> opv(1);
-    opv[0].op.op = CEPH_OSD_OP_SETALLOCHINT;
-    opv[0].op.alloc_hint.expected_object_size = oi.expected_object_size;
-    opv[0].op.alloc_hint.expected_write_size = oi.expected_write_size;
-    if (promote) {
-      opv[0].op.alloc_hint.flags = CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER | oi.alloc_hint_flags;
-    } else {
-      opv[0].op.alloc_hint.flags = CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER ^ oi.alloc_hint_flags;
-    }
-    MOSDOp *m_ = new MOSDOp(client_inc, osd->get_tid(),
-                            soid, spgid,
-                            get_osdmap()->get_epoch(),
-                            flags, get_osdmap()->get_features(CEPH_ENTITY_TYPE_OSD,
-                                                              nullptr));
-    m_->set_mtime(ceph::real_clock::now());
-    m_->set_priority(cct->_conf->osd_client_op_priority);
-    m_->set_reqid(osd_reqid_t()); // XXXX
-    m_->ops = opv;
-    dout(10) << __func__ << "YHG: send a set alloc hint request to myself: "
-            << *m_ << dendl;
-    osd->send_message_osd_cluster(pg_whoami.osd, m_, get_osdmap()->get_epoch());
-//    OpRequestRef op_ = osd->create_request(m_);
-//    requeue_op(op_);
-
-    return true;
   }
 
   // kick off async migration
