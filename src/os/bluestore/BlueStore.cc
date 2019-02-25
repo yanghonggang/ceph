@@ -10824,7 +10824,7 @@ int BlueStore::_do_alloc_write(
            << ", rval " << r
            << ", alloc_target is alloc: " << (alloc_target == alloc) 
 	   << dendl;
-      assert(0 == "alloc disk space failed");
+      // assert(0 == "alloc disk space failed");
       txc->rval = r;
       r = 0;
       return r;
