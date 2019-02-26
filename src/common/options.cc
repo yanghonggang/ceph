@@ -5794,7 +5794,7 @@ static std::vector<Option> get_rbd_options() {
     .set_description("when trying to discard a range inside an object, set to true to skip zeroing the range"),
 
     Option("rbd_enable_alloc_hint", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
-    .set_default(true)
+    .set_default(false)
     .set_description("when writing a object, it will issue a hint to osd backend to indicate the expected size object need"),
 
     Option("rbd_tracing", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
