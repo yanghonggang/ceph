@@ -5924,18 +5924,30 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       {
 	tracepoint(osd, do_osd_op_pre_setallochint, soid.oid.name.c_str(), soid.snap.val, op.alloc_hint.expected_object_size, op.alloc_hint.expected_write_size);
         bool migration_hint = false;
-        if (obs.exists && ((oi.alloc_hint_flags ^ op.alloc_hint.flags) &
-            CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER)) {
+        result = 0;
+        // when set-alloc-hint op is mixed with other ops, just treat it as
+        // general set-alloc-hint op, not migration hint.
+        if (obs.exists && (ops.size() == 1)) {
           migration_hint = true;
-          // migrate from fast dev to slow dev
-          if (oi.alloc_hint_flags & CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER) {
-            ctx->delta_stats.num_bytes_fast -= oi.size;
-            ctx->delta_stats.num_objects_fast--;
-            debug_fast_remove(soid);
+
+          if ((oi.alloc_hint_flags ^
+              op.alloc_hint.flags) & CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER) {
+            dout(15) << __func__ << " HINT migration op changed:" << oi << dendl;
+            // migrate from fast dev to slow dev
+            if (oi.alloc_hint_flags & CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER) {
+              ctx->delta_stats.num_bytes_fast -= oi.size;
+              ctx->delta_stats.num_objects_fast--;
+              oi.clear_on_tier();
+              debug_fast_remove(soid);
+            } else {
+              ctx->delta_stats.num_bytes_fast += oi.size;
+              ctx->delta_stats.num_objects_fast++;
+              oi.set_on_tier();
+              debug_fast_add(soid);
+            }
           } else {
-            ctx->delta_stats.num_bytes_fast += oi.size;
-            ctx->delta_stats.num_objects_fast++;
-            debug_fast_add(soid);
+            dout(15) << __func__ << " HINT migration op no change:" << oi << dendl;
+            break; // no change
           }
         }
         // Note: set alloc_hint_flag before call maybe_create_new_object()
@@ -5944,14 +5956,18 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
         if (!migration_hint) {
 	  oi.expected_object_size = op.alloc_hint.expected_object_size;
  	  oi.expected_write_size = op.alloc_hint.expected_write_size;
+          // don't modify the fast bit
+          oi.alloc_hint_flags = (op.alloc_hint.flags &
+                                 ~CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER) |
+                                (oi.alloc_hint_flags &
+                                 CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER);
         }
-	oi.alloc_hint_flags = op.alloc_hint.flags;
 	maybe_create_new_object(ctx);
-        t->set_alloc_hint(soid, op.alloc_hint.expected_object_size,
-                          op.alloc_hint.expected_write_size,
+        dout(15) << __func__ << " HINT final, " << oi << dendl;
+        t->set_alloc_hint(soid, oi.expected_object_size,
+                          oi.expected_write_size,
 			  oi.alloc_hint_flags);
         ctx->delta_stats.num_wr++;
-        result = 0;
       }
       break;
 
