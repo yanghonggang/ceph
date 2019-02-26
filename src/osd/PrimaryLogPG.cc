@@ -2227,6 +2227,20 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
   }
 
   if ((pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL) && obc.get()) {
+    // modify client's set alloc hint op, to ensure it will not disturb
+    // our migration logical
+    dout(20) << __func__ << " before fix: " << m->ops << dendl;
+    if (m->ops.size() > 1) {
+      for (auto& op : m->ops) {
+        if (op.op.op == CEPH_OSD_OP_SETALLOCHINT) {
+          // use the current hint flag to fix user's mixed alloc hint op
+          op.op.alloc_hint.flags = obc->obs.oi.alloc_hint_flags;
+          dout(15) << __func__ << " after fix: " << m->ops
+                  << ", for " << obc->obs.oi
+                  << dendl;
+        } 
+      }
+    }
     if (m->ops[0].op.op != CEPH_OSD_OP_DELETE) {
       uint32_t recency = op->may_write() ? 
                            pool.info.min_write_recency_for_promote :
