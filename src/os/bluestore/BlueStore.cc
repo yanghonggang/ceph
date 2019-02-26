@@ -6424,10 +6424,12 @@ int BlueStore::_fsck(bool deep, bool repair)
 	r = -EIO;
         goto out_scan;
       }
-      dout(20) << __func__ << "  deferred " << wt.seq
+      derr << __func__ << "  deferred " << wt.seq
 	       << " ops " << wt.ops.size()
 	       << " released 0x" << std::hex << wt.released << std::dec << dendl;
-      assert(0);
+      // as all deferred ops should have been processed in _deferred_replay(),
+      // this is a dead branch
+      assert(0 == "why your are here");
       for (auto e = wt.released.begin(); e != wt.released.end(); ++e) {
         apply(
           e.get_start(), e.get_len(), fm->get_alloc_size(), used_blocks,
