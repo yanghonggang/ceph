@@ -955,6 +955,9 @@ protected:
                          ALLOC_HINT_FLAG_IMMUTABLE;
         if (data.inline_small)
           flags |= ALLOC_HINT_FLAG_INLINE;
+        if (data.hint_fast)
+          flags |= ALLOC_HINT_FLAG_FAST_TIER;
+
 	op.set_alloc_hint2(data.object_size, data.op_size, flags);
       }
       op.write(offset, bl);
@@ -3231,10 +3234,11 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
       op_size = object_size;
     cout << "hints = " << (int)hints << std::endl;
     cout << "inline = " << (int)inline_small << std::endl;
+    cout << "hint_fast = " << (int)hint_fast << std::endl;
     ret = bencher.aio_bench(operation, seconds,
 			    concurrent_ios, op_size, object_size,
 			    max_objects, cleanup, hints, run_name, no_verify,
-                            inline_small);
+                            inline_small, hint_fast);
     if (ret != 0)
       cerr << "error during benchmark: " << cpp_strerror(ret) << std::endl;
     if (formatter && output)

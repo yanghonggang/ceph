@@ -38,6 +38,7 @@ struct bench_data {
   uint64_t op_size;     // the size of the read/write ops
   bool hints;
   bool inline_small; // inline small write
+  bool hint_fast; // send fast hint
   // same as object_size for write tests
   int in_flight; //number of reads/writes being waited on
   int started;
@@ -111,7 +112,7 @@ public:
     int operation, int secondsToRun,
     int concurrentios, uint64_t op_size, uint64_t object_size, unsigned max_objects,
     bool cleanup, bool hints, const std::string& run_name, bool no_verify=false,
-    bool inline_small=false);
+    bool inline_small=false, bool hint_fast=false);
   int clean_up(const std::string& prefix, int concurrentios, const std::string& run_name);
 
   void set_show_time(bool dt) {
