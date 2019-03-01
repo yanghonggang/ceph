@@ -10826,9 +10826,11 @@ int BlueStore::_do_alloc_write(
            << ", rval " << r
            << ", alloc_target is alloc: " << (alloc_target == alloc) 
 	   << dendl;
+      // crash here, or _txc_add_transaction
+      // this will stop bluestore from doing sth stupid
       // assert(0 == "alloc disk space failed");
       txc->rval = r;
-      r = 0;
+      //r = 0; // return 0 is deadmind, this will damage our data
       return r;
     }  
   }
