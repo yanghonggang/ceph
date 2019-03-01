@@ -6054,21 +6054,31 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	    t->nop(soid);
 	  }
 	} else {
-#if 0
           // cache is full, before extend an object on fast dev,
           // migrate it to slow dev first(hope slow dev is not full)
           if (agent_state && (op.extent.offset + op.extent.length > oi.size) && 
               (agent_state->evict_mode == TierAgentState::EVICT_MODE_FULL) &&
+              (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL) &&
               oi.is_on_tier()) {
+            dout(15) << __func__ << " cache is full, migrate to slow dev first: "
+                    << oi
+                    << ", op is write" 
+                    << dendl;
+
             oi.clear_on_tier();
-            // FIXME: update fast counters
+            debug_fast_remove(soid);
+
+            ctx->delta_stats.num_bytes_fast -= oi.size;
+            ctx->delta_stats.num_objects_fast --;
+
             t->set_alloc_hint(oi.soid, oi.expected_object_size,
                               oi.expected_write_size, obs.oi.alloc_hint_flags);
-            dout(10) << __func__ << " cache is full, migrate to slow dev first: "
-                    << oi
-                    << dendl;
+            // auto unpin this object
+            if (oi.is_cache_pinned()) {
+              oi.clear_flag(object_info_t::FLAG_CACHE_PIN);
+              ctx->delta_stats.num_objects_pinned--;
+            }
           }
-#endif
 	  t->write(
 	    soid, op.extent.offset, op.extent.length, osd_op.indata, op.flags);
 	}
@@ -6107,6 +6117,33 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	} else if (obs.exists && op.extent.length < oi.size) {
 	  t->truncate(soid, op.extent.length);
 	}
+        if (obs.exists && op.extent.length > oi.size){
+          // cache is full, before extend an object on fast dev,
+          // migrate it to slow dev first(hope slow dev is not full)
+          if (agent_state && 
+              (agent_state->evict_mode == TierAgentState::EVICT_MODE_FULL) &&
+              (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL) &&
+              oi.is_on_tier()) {
+            dout(15) << __func__ << " cache is full, migrate to slow dev first: "
+                    << oi
+                    << ", op is writefull" 
+                    << dendl;
+
+            oi.clear_on_tier();
+            debug_fast_remove(soid);
+
+            ctx->delta_stats.num_bytes_fast -= oi.size;
+            ctx->delta_stats.num_objects_fast --;
+
+            t->set_alloc_hint(oi.soid, oi.expected_object_size,
+                              oi.expected_write_size, obs.oi.alloc_hint_flags);
+            // auto unpin this object
+            if (oi.is_cache_pinned()) {
+              oi.clear_flag(object_info_t::FLAG_CACHE_PIN);
+              ctx->delta_stats.num_objects_pinned--;
+            }
+          }
+        }
 	if (op.extent.length) {
 	  t->write(soid, 0, op.extent.length, osd_op.indata, op.flags);
 	}
@@ -6345,7 +6382,13 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	  result = -ENOENT;
 	  break;
 	}
-
+        // auto promote maybe failed
+        if ((pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL) &&
+            !oi.is_on_tier()) {
+          dout(0) << __func__ << ", auto promote failed for " << oi << dendl;
+          result = -ENOSPC;
+          break;
+        }
 	if (!oi.is_cache_pinned()) {
 	  oi.set_flag(object_info_t::FLAG_CACHE_PIN);
 	  ctx->modify = true;
@@ -14109,6 +14152,10 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
       info.stats.stats.sum.num_evict_mode_full = 0;
     }
     agent_state->evict_mode = evict_mode;
+  }
+  if (cct->_conf->osd_tier_inject_cache_mode_full) {
+    dout(5) << __func__ << ", force tier agent mode FULL" << dendl;
+    agent_state->evict_mode = TierAgentState::EVICT_MODE_FULL;
   }
   uint64_t old_effort = agent_state->evict_effort;
   if (evict_effort != agent_state->evict_effort) {

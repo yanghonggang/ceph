@@ -1857,6 +1857,10 @@ std::vector<Option> get_global_options() {
     .set_default(true)
     .set_description("store hit set objects on slow dev by default"),
 
+    Option("osd_tier_inject_cache_mode_full", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+    .set_default(false)
+    .set_description("force cache mode to full, for test only"),
+
     Option("osd_tier_promote_max_objects_sec", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
     .set_default(25)
     .set_description(""),

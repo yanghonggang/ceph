@@ -639,6 +639,7 @@ OPTION(osd_hit_set_namespace, OPT_STR) // rados namespace for hit_set tracking
 OPTION(osd_hit_set_on_slow, OPT_BOOL) // store hit set on slow dev by default
 
 // conservative default throttling values
+OPTION(osd_tier_inject_cache_mode_full, OPT_BOOL)
 OPTION(osd_tier_promote_max_objects_sec, OPT_U64)
 OPTION(osd_tier_promote_max_bytes_sec, OPT_U64)
 
