@@ -4617,8 +4617,8 @@ void PrimaryLogPG::maybe_create_new_object(
     obs.oi.new_object();
     if (!ignore_transaction)
       ctx->op_t->create(obs.oi.soid);
-    if (!ignore_transaction && (agent_state && agent_state->evict_mode !=
-         TierAgentState::EVICT_MODE_FULL) &&
+    if (!ignore_transaction && (agent_state && agent_state->evict_mode ==
+         TierAgentState::EVICT_MODE_IDLE) &&
         pool.info.cache_local_mode_default_fast) {
       // force create on fast device
       obs.oi.set_on_tier();
