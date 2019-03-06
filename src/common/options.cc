@@ -1104,6 +1104,10 @@ std::vector<Option> get_global_options() {
     .set_default(.95)
     .set_description(""),
 
+    Option("mon_osd_tier_full_ratio", Option::TYPE_FLOAT, Option::LEVEL_ADVANCED)
+    .set_default(.95)
+    .set_description(""),
+
     Option("mon_osd_backfillfull_ratio", Option::TYPE_FLOAT, Option::LEVEL_ADVANCED)
     .set_default(.90)
     .set_description(""),

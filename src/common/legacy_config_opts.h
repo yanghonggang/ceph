@@ -240,6 +240,7 @@ OPTION(mon_pg_warn_min_pool_objects, OPT_INT)  // do not warn on pools below thi
 OPTION(mon_pg_check_down_all_threshold, OPT_FLOAT) // threshold of down osds after which we check all pgs
 OPTION(mon_cache_target_full_warn_ratio, OPT_FLOAT) // position between pool cache_target_full and max where we start warning
 OPTION(mon_osd_full_ratio, OPT_FLOAT) // what % full makes an OSD "full"
+OPTION(mon_osd_tier_full_ratio, OPT_FLOAT) // what % full makes an OSD's tier "full"
 OPTION(mon_osd_backfillfull_ratio, OPT_FLOAT) // what % full makes an OSD backfill full (backfill halted)
 OPTION(mon_osd_nearfull_ratio, OPT_FLOAT) // what % full makes an OSD near full
 OPTION(mon_osd_initial_require_min_compat_client, OPT_STR)

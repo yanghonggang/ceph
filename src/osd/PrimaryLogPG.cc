@@ -5940,6 +5940,23 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
               oi.clear_on_tier();
               debug_fast_remove(soid);
             } else {
+              float dev_full_ratio = osd->get_fast_full_ratio();
+
+              // maybe pool cache mode is not local
+              if ((agent_state && 
+                   (agent_state->evict_mode ==
+                    TierAgentState::EVICT_MODE_FULL) &&
+                   (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL)) ||
+                  dev_full_ratio > cct->_conf->mon_osd_tier_full_ratio) {
+                dout(10) << __func__
+                         << " agent stat: " << ((agent_state &&
+                            (agent_state->evict_mode ==
+                             TierAgentState::EVICT_MODE_FULL)) ? "full" : "na")
+                         << ", tier is FULL(dev " << dev_full_ratio
+                         << "), obj " << oi << dendl;
+                result = -ENOSPC;
+                break;
+              }
               ctx->delta_stats.num_bytes_fast += oi.size;
               ctx->delta_stats.num_objects_fast++;
               oi.set_on_tier();
