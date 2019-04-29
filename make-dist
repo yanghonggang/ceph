@@ -83,7 +83,7 @@ build_dashboard_frontend() {
   $TEMP_DIR/bin/nodeenv -p -n 8.10.0
   cd src/pybind/mgr/dashboard/frontend
   . $TEMP_DIR/bin/activate
-  npm install
+  npm ci
   npm run build -- --prod
   deactivate
   cd $CURR_DIR
