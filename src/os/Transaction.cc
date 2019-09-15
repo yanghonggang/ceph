@@ -437,6 +437,7 @@ void ObjectStore::Transaction::dump(ceph::Formatter *f)
         f->dump_stream("oid") << oid;
         f->dump_stream("expected_object_size") << expected_object_size;
         f->dump_stream("expected_write_size") << expected_write_size;
+        f->dump_stream("flags") << op->alloc_hint_flags;
       }
       break;
 

@@ -212,7 +212,7 @@ int ObjBencher::aio_bench(
   uint64_t op_size, uint64_t object_size,
   unsigned max_objects,
   bool cleanup, bool hints,
-  const std::string& run_name, bool no_verify) {
+  const std::string& run_name, bool no_verify, bool hint_fast) {
 
   if (concurrentios <= 0)
     return -EINVAL;
@@ -243,6 +243,7 @@ int ObjBencher::aio_bench(
   lock.Lock();
   data.done = false;
   data.hints = hints;
+  data.hint_fast = hint_fast;
   data.object_size = object_size;
   data.op_size = op_size;
   data.in_flight = 0;

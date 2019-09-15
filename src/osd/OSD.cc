@@ -273,6 +273,7 @@ OSDService::OSDService(OSD *osd) :
   full_status_lock("OSDService::full_status_lock"),
   cur_state(NONE),
   cur_ratio(0),
+  cur_fast_ratio(0),
   epoch_lock("OSDService::epoch_lock"),
   boot_epoch(0), up_epoch(0), bind_epoch(0),
   is_stopping_lock("OSDService::is_stopping_lock")
@@ -759,11 +760,12 @@ float OSDService::get_failsafe_full_ratio()
   return full_ratio;
 }
 
-void OSDService::check_full_status(float ratio)
+void OSDService::check_full_status(float ratio, float fast_ratio)
 {
   Mutex::Locker l(full_status_lock);
 
   cur_ratio = ratio;
+  cur_fast_ratio = fast_ratio;
 
   // The OSDMap ratios take precendence.  So if the failsafe is .95 and
   // the admin sets the cluster full to .96, the failsafe moves up to .96
@@ -930,15 +932,23 @@ void OSDService::set_injectfull(s_names type, int64_t count)
 
 osd_stat_t OSDService::set_osd_stat(const struct store_statfs_t &stbuf,
                                     vector<int>& hb_peers,
-				    int num_pgs)
+				    int num_pgs,
+                                    const struct store_statfs_t &stbuf_fast)
 {
   uint64_t bytes = stbuf.total;
   uint64_t used = bytes - stbuf.available;
   uint64_t avail = stbuf.available;
+  uint64_t bytes_fast = stbuf_fast.total;
+  uint64_t used_fast = bytes_fast - stbuf_fast.available;
+  uint64_t avail_fast = stbuf_fast.available;
 
   osd->logger->set(l_osd_stat_bytes, bytes);
   osd->logger->set(l_osd_stat_bytes_used, used);
   osd->logger->set(l_osd_stat_bytes_avail, avail);
+
+  osd->logger->set(l_osd_stat_bytes_fast, bytes_fast);
+  osd->logger->set(l_osd_stat_bytes_used_fast, used_fast);
+  osd->logger->set(l_osd_stat_bytes_avail_fast, avail_fast);
 
   {
     Mutex::Locker l(stat_lock);
@@ -947,6 +957,11 @@ osd_stat_t OSDService::set_osd_stat(const struct store_statfs_t &stbuf,
     osd_stat.kb = bytes >> 10;
     osd_stat.kb_used = used >> 10;
     osd_stat.kb_avail = avail >> 10;
+
+    osd_stat.kb_fast = bytes_fast >> 10;
+    osd_stat.kb_used_fast = used_fast >> 10;
+    osd_stat.kb_avail_fast = avail_fast >> 10;
+
     osd_stat.num_pgs = num_pgs;
     return osd_stat;
   }
@@ -955,18 +970,23 @@ osd_stat_t OSDService::set_osd_stat(const struct store_statfs_t &stbuf,
 void OSDService::update_osd_stat(vector<int>& hb_peers)
 {
   // load osd stats first
-  struct store_statfs_t stbuf;
-  int r = osd->store->statfs(&stbuf);
+  struct store_statfs_t stbuf, stbuf_fast;
+  int r = osd->store->statfs(&stbuf, &stbuf_fast);
   if (r < 0) {
     derr << "statfs() failed: " << cpp_strerror(r) << dendl;
     return;
   }
 
-  auto new_stat = set_osd_stat(stbuf, hb_peers, osd->get_num_pgs());
+  dout(15) << __func__ << " fast: total " << stbuf_fast.total
+          << ", available " << stbuf_fast.available
+          << dendl;
+  auto new_stat = set_osd_stat(stbuf, hb_peers, osd->get_num_pgs(), stbuf_fast);
   dout(20) << "update_osd_stat " << new_stat << dendl;
   assert(new_stat.kb);
   float ratio = ((float)new_stat.kb_used) / ((float)new_stat.kb);
-  check_full_status(ratio);
+  float fast_ratio =((float)(stbuf_fast.total - stbuf_fast.available)/
+                     (float)(stbuf_fast.total + 1));
+  check_full_status(ratio, fast_ratio);
 }
 
 bool OSDService::check_osdmap_full(const set<pg_shard_t> &missing_on)
@@ -3201,10 +3221,24 @@ void OSD::create_logger()
     PerfCountersBuilder::PRIO_USEFUL);
   osd_plb.add_u64(l_osd_stat_bytes_avail, "stat_bytes_avail", "Available space");
 
+  osd_plb.add_u64(
+    l_osd_stat_bytes_fast, "stat_bytes_fast", "OSD fast dev size", "size",
+    PerfCountersBuilder::PRIO_USEFUL);
+  osd_plb.add_u64(
+    l_osd_stat_bytes_used_fast, "stat_bytes_used_fast", "Used fast dev space",
+    "used",
+    PerfCountersBuilder::PRIO_USEFUL);
+  osd_plb.add_u64(l_osd_stat_bytes_avail_fast, "stat_bytes_avail_fast",
+                  "Available fast dev space");
+
   osd_plb.add_u64_counter(
     l_osd_copyfrom, "copyfrom", "Rados \"copy-from\" operations");
 
   osd_plb.add_u64_counter(l_osd_tier_promote, "tier_promote", "Tier promotions");
+  osd_plb.add_u64_counter(l_osd_tier_read_promote, "tier_read_promote",
+                          "Tier read promotions");
+  osd_plb.add_u64_counter(l_osd_tier_write_promote, "tier_write_promote",
+                          "Tier write promotions");
   osd_plb.add_u64_counter(l_osd_tier_flush, "tier_flush", "Tier flushes");
   osd_plb.add_u64_counter(
     l_osd_tier_flush_fail, "tier_flush_fail", "Failed tier flushes");
@@ -3243,10 +3277,17 @@ void OSD::create_logger()
     l_osd_object_ctx_cache_total, "object_ctx_cache_total", "Object context cache lookups");
 
   osd_plb.add_u64_counter(l_osd_op_cache_hit, "op_cache_hit");
+  osd_plb.add_u64_counter(l_osd_op_cache_miss, "op_cache_miss");
+  osd_plb.add_u64_counter(l_osd_op_cache_read_hit, "op_cache_read_hit");
+  osd_plb.add_u64_counter(l_osd_op_cache_write_hit, "op_cache_write_hit");
+  osd_plb.add_u64_counter(l_osd_op_cache_demote_dirty, "op_cache_demote_dirty");
+  osd_plb.add_u64_counter(l_osd_op_cache_demote_clean, "op_cache_demote_clean");
   osd_plb.add_time_avg(
     l_osd_tier_flush_lat, "osd_tier_flush_lat", "Object flush latency");
   osd_plb.add_time_avg(
     l_osd_tier_promote_lat, "osd_tier_promote_lat", "Object promote latency");
+  osd_plb.add_time_avg(
+    l_osd_tier_demote_lat, "osd_tier_demote_lat", "Object demote latency");
   osd_plb.add_time_avg(
     l_osd_tier_r_lat, "osd_tier_r_lat", "Object proxy read latency");
 

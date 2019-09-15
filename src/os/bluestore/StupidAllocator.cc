@@ -170,8 +170,10 @@ int64_t StupidAllocator::allocate_int(
       *length = max;
     }
   }
-  dout(30) << __func__ << " got 0x" << std::hex << *offset << "~" << *length
+  dout(20) << __func__ << " got 0x" << std::hex << *offset << "~" << *length
 	   << " from bin " << std::dec << bin << dendl;
+  assert((*offset % alloc_unit) == 0);
+  assert((*length % alloc_unit) == 0);
 
   free[bin].erase(*offset, *length);
   uint64_t off, len;
@@ -250,6 +252,22 @@ void StupidAllocator::release(
   num_free += length;
 }
 
+void StupidAllocator::release(                                                                         
+  const interval_set<uint64_t>& release_set)                                                           
+{                                                                                                      
+  std::lock_guard<std::mutex> l(lock);                                                                 
+  for (interval_set<uint64_t>::const_iterator p = release_set.begin();                                 
+       p != release_set.end();                                                                         
+       ++p) {                                                                                          
+    const auto offset = p.get_start();                                                                 
+    const auto length = p.get_len();                                                                   
+    ldout(cct, 10) << __func__ << " 0x" << std::hex << offset << "~" << length                         
+                   << std::dec << dendl;                                                               
+    _insert_free(offset, length);                                                                      
+    num_free += length;                                                                                
+  }                                                                                                    
+}
+
 uint64_t StupidAllocator::get_free()
 {
   std::lock_guard<std::mutex> l(lock);
@@ -306,9 +324,9 @@ void StupidAllocator::init_rm_free(uint64_t offset, uint64_t length)
               ldout(cct, 30) << __func__ << " demoting1 0x" << std::hex << off << "~" << len
                              << std::dec << " to bin " << newbin << dendl;
               _insert_free(off, len);
-              return false;
+              return true;
             }
-            return true;
+            return false;
           });
         ++it;
       }

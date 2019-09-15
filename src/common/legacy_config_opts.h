@@ -239,6 +239,7 @@ OPTION(mon_pg_warn_min_pool_objects, OPT_INT)  // do not warn on pools below thi
 OPTION(mon_pg_check_down_all_threshold, OPT_FLOAT) // threshold of down osds after which we check all pgs
 OPTION(mon_cache_target_full_warn_ratio, OPT_FLOAT) // position between pool cache_target_full and max where we start warning
 OPTION(mon_osd_full_ratio, OPT_FLOAT) // what % full makes an OSD "full"
+OPTION(mon_osd_tier_full_ratio, OPT_FLOAT) // what % full makes an OSD's tier "full"
 OPTION(mon_osd_backfillfull_ratio, OPT_FLOAT) // what % full makes an OSD backfill full (backfill halted)
 OPTION(mon_osd_nearfull_ratio, OPT_FLOAT) // what % full makes an OSD near full
 OPTION(mon_osd_initial_require_min_compat_client, OPT_STR)
@@ -580,6 +581,9 @@ OPTION(osd_agent_hist_halflife, OPT_INT)
 // this amount below the threshold to disable.
 OPTION(osd_agent_slop, OPT_FLOAT)
 
+// skip agent migration for debug only
+OPTION(osd_agent_skip_migrate, OPT_BOOL)
+
 OPTION(osd_uuid, OPT_UUID)
 OPTION(osd_data, OPT_STR)
 OPTION(osd_journal, OPT_STR)
@@ -628,13 +632,18 @@ OPTION(osd_pool_default_cache_target_full_ratio, OPT_FLOAT)
 OPTION(osd_pool_default_cache_min_flush_age, OPT_INT)  // seconds
 OPTION(osd_pool_default_cache_min_evict_age, OPT_INT)  // seconds
 OPTION(osd_pool_default_cache_max_evict_check_size, OPT_INT)  // max size to check for eviction
+OPTION(osd_pool_default_cache_local_mode_fast, OPT_BOOL) // write to fast dev by default
 OPTION(osd_hit_set_min_size, OPT_INT)  // min target size for a HitSet
 OPTION(osd_hit_set_max_size, OPT_INT)  // max target size for a HitSet
 OPTION(osd_hit_set_namespace, OPT_STR) // rados namespace for hit_set tracking
+OPTION(osd_hit_set_on_slow, OPT_BOOL) // store hit set on slow dev by default
 
 // conservative default throttling values
+OPTION(osd_tier_inject_cache_mode_full, OPT_BOOL)
 OPTION(osd_tier_promote_max_objects_sec, OPT_U64)
 OPTION(osd_tier_promote_max_bytes_sec, OPT_U64)
+
+OPTION(osd_tier_force_writeback, OPT_BOOL) // force not to proxy write under writeback mode
 
 OPTION(osd_tier_default_cache_mode, OPT_STR)
 OPTION(osd_tier_default_cache_hit_set_count, OPT_INT)
@@ -783,6 +792,7 @@ OPTION(osd_deep_scrub_interval, OPT_FLOAT) // once a week
 OPTION(osd_deep_scrub_randomize_ratio, OPT_FLOAT) // scrubs will randomly become deep scrubs at this rate (0.15 -> 15% of scrubs are deep)
 OPTION(osd_deep_scrub_stride, OPT_INT)
 OPTION(osd_deep_scrub_update_digest_min_age, OPT_INT)   // objects must be this old (seconds) before we update the whole-object digest on scrub
+OPTION(osd_scrub_mismatch_core, OPT_BOOL) // core when mismatch encountered
 OPTION(osd_class_dir, OPT_STR) // where rados plugins are stored
 OPTION(osd_open_classes_on_start, OPT_BOOL)
 OPTION(osd_class_load_list, OPT_STR) // list of object classes allowed to be loaded (allow all: *)
@@ -967,6 +977,8 @@ OPTION(bdev_debug_aio_suicide_timeout, OPT_FLOAT)
 // NVMe driver is loaded while osd is running.
 OPTION(bdev_nvme_unbind_from_kernel, OPT_BOOL)
 OPTION(bdev_nvme_retry_count, OPT_INT) // -1 means by default which is 4
+OPTION(bdev_enable_discard, OPT_BOOL)
+OPTION(bdev_async_discard, OPT_BOOL)
 
 OPTION(objectstore_blackhole, OPT_BOOL)
 
@@ -1015,8 +1027,12 @@ OPTION(bluestore_block_db_create, OPT_BOOL)
 OPTION(bluestore_block_wal_path, OPT_STR)
 OPTION(bluestore_block_wal_size, OPT_U64) // rocksdb wal
 OPTION(bluestore_block_wal_create, OPT_BOOL)
+OPTION(bluestore_block_fast_path, OPT_STR)
+OPTION(bluestore_block_fast_size, OPT_U64) // fast tier
+OPTION(bluestore_block_fast_create, OPT_BOOL)
 OPTION(bluestore_block_preallocate_file, OPT_BOOL) //whether preallocate space if block/db_path/wal_path is file rather that block device.
 OPTION(bluestore_csum_type, OPT_STR) // none|xxhash32|xxhash64|crc32c|crc32c_16|crc32c_8
+OPTION(bluestore_retry_disk_reads, OPT_U64)
 OPTION(bluestore_csum_min_block, OPT_U32)
 OPTION(bluestore_csum_max_block, OPT_U32)
 OPTION(bluestore_min_alloc_size, OPT_U32)
@@ -1113,6 +1129,7 @@ OPTION(bluestore_debug_omit_kv_commit, OPT_BOOL)
 OPTION(bluestore_debug_permit_any_bdev_label, OPT_BOOL)
 OPTION(bluestore_shard_finishers, OPT_BOOL)
 OPTION(bluestore_debug_random_read_err, OPT_DOUBLE)
+OPTION(bluestore_inject_migration_err, OPT_BOOL)
 
 OPTION(kstore_max_ops, OPT_U64)
 OPTION(kstore_max_bytes, OPT_U64)
@@ -1317,7 +1334,6 @@ OPTION(rgw_bucket_index_max_aio, OPT_U32)
 OPTION(rgw_enable_quota_threads, OPT_BOOL)
 OPTION(rgw_enable_gc_threads, OPT_BOOL)
 OPTION(rgw_enable_lc_threads, OPT_BOOL)
-
 
 OPTION(rgw_data, OPT_STR)
 OPTION(rgw_enable_apis, OPT_STR)

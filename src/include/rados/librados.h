@@ -150,6 +150,7 @@ enum {
   LIBRADOS_ALLOC_HINT_FLAG_LONGLIVED = 128,
   LIBRADOS_ALLOC_HINT_FLAG_COMPRESSIBLE = 256,
   LIBRADOS_ALLOC_HINT_FLAG_INCOMPRESSIBLE = 512,
+  LIBRADOS_ALLOC_HINT_FLAG_FAST_TIER = (1U << 30),
 };
 /** @} */
 
@@ -273,10 +274,14 @@ typedef void *rados_omap_iter_t;
 struct rados_pool_stat_t {
   /// space used in bytes
   uint64_t num_bytes;
+  /// tier space used in bytes
+  uint64_t num_bytes_fast;
   /// space used in KB
   uint64_t num_kb;
   /// number of objects in the pool
   uint64_t num_objects;
+  /// number of objects in the pool's tier device
+  uint64_t num_objects_fast;
   /// number of clones of objects
   uint64_t num_object_clones;
   /// num_objects * num_replicas
@@ -685,6 +690,17 @@ CEPH_RADOS_API int rados_pool_list(rados_t cluster, char *buf, size_t len);
 CEPH_RADOS_API int rados_inconsistent_pg_list(rados_t cluster, int64_t pool,
 					      char *buf, size_t len);
 
+
+/**
+ * List inconsistent objects of the given placement group
+ * @param cluster cluster handle
+ * @param pg_str pg ID
+ * @param buf output buffer
+ * @param len output buffer length
+ * @returns length of the buffer we would need to list all inconsistent objects
+ */
+CEPH_RADOS_API int rados_inconsistent_obj_list(rados_t cluster, const char* pg_str,
+                char* buf, size_t len);
 /**
  * Get a configuration handle for a rados cluster handle
  *
@@ -1054,6 +1070,23 @@ CEPH_RADOS_API int rados_nobjects_list_next(rados_list_ctx_t ctx,
                                             const char **entry,
 	                                    const char **key,
                                             const char **nspace);
+/**
+ * Get the next object name and locator in the pool
+ *
+ * *entry and *key are valid until next call to rados_nobjects_list_*
+ *
+ * @param ctx iterator marking where you are in the listing
+ * @param entry where to store the name of the entry
+ * @param key where to store the object locator (set to NULL to ignore)
+ * @param nspace where to store the object namespace (set to NULL to ignore)
+ * @returns 0 on success, negative error code on failure
+ * @returns -ENOENT when there are no more objects to list
+ */
+CEPH_RADOS_API int rados_nobjects_list_next2(rados_list_ctx_t ctx,
+                                            const char **entry,
+	                                    const char **key,
+                                            const char **nspace,
+                                            int *fast);
 
 /**
  * Close the object listing handle.

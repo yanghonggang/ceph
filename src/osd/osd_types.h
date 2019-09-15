@@ -896,6 +896,7 @@ WRITE_CLASS_ENCODER(objectstore_perf_stat_t)
  */
 struct osd_stat_t {
   int64_t kb, kb_used, kb_avail;
+  int64_t kb_fast, kb_used_fast, kb_avail_fast;
   vector<int> hb_peers;
   int32_t snap_trim_queue_len, num_snap_trimming;
 
@@ -909,12 +910,16 @@ struct osd_stat_t {
   uint32_t num_pgs = 0;
 
   osd_stat_t() : kb(0), kb_used(0), kb_avail(0),
+                 kb_fast(0), kb_used_fast(0), kb_avail_fast(0),
 		 snap_trim_queue_len(0), num_snap_trimming(0) {}
 
   void add(const osd_stat_t& o) {
     kb += o.kb;
     kb_used += o.kb_used;
     kb_avail += o.kb_avail;
+    kb_fast += o.kb_fast;
+    kb_used_fast += o.kb_used_fast;
+    kb_avail_fast += o.kb_avail_fast;
     snap_trim_queue_len += o.snap_trim_queue_len;
     num_snap_trimming += o.num_snap_trimming;
     op_queue_age_hist.add(o.op_queue_age_hist);
@@ -925,6 +930,9 @@ struct osd_stat_t {
     kb -= o.kb;
     kb_used -= o.kb_used;
     kb_avail -= o.kb_avail;
+    kb_fast -= o.kb_fast;
+    kb_used_fast -= o.kb_used_fast;
+    kb_avail_fast -= o.kb_avail_fast;
     snap_trim_queue_len -= o.snap_trim_queue_len;
     num_snap_trimming -= o.num_snap_trimming;
     op_queue_age_hist.sub(o.op_queue_age_hist);
@@ -1227,6 +1235,7 @@ struct pg_pool_t {
     CACHEMODE_READFORWARD = 4,           ///< forward reads, write to cache flush later
     CACHEMODE_READPROXY = 5,             ///< proxy reads, write to cache flush later
     CACHEMODE_PROXY = 6,                 ///< proxy if not in cache
+    CACHEMODE_LOCAL = 7,                 ///< local object store layer tier
   } cache_mode_t;
   static const char *get_cache_mode_name(cache_mode_t m) {
     switch (m) {
@@ -1237,6 +1246,7 @@ struct pg_pool_t {
     case CACHEMODE_READFORWARD: return "readforward";
     case CACHEMODE_READPROXY: return "readproxy";
     case CACHEMODE_PROXY: return "proxy";
+    case CACHEMODE_LOCAL: return "local";
     default: return "unknown";
     }
   }
@@ -1255,6 +1265,9 @@ struct pg_pool_t {
       return CACHEMODE_READPROXY;
     if (s == "proxy")
       return CACHEMODE_PROXY;
+    if (s == "local")
+      return CACHEMODE_LOCAL;
+
     return (cache_mode_t)-1;
   }
   const char *get_cache_mode_name() const {
@@ -1270,6 +1283,7 @@ struct pg_pool_t {
     case CACHEMODE_WRITEBACK:
     case CACHEMODE_READFORWARD:
     case CACHEMODE_READPROXY:
+    case CACHEMODE_LOCAL:
       return true;
     default:
       assert(0 == "implement me");
@@ -1324,6 +1338,7 @@ public:
   cache_mode_t cache_mode;  ///< cache pool mode
 
   bool is_tier() const { return tier_of >= 0; }
+  bool in_local_mode() const { return cache_mode == CACHEMODE_LOCAL; }
   bool has_tiers() const { return !tiers.empty(); }
   void clear_tier() {
     tier_of = -1;
@@ -1345,6 +1360,7 @@ public:
     cache_target_dirty_ratio_micro = 0;
     cache_target_dirty_high_ratio_micro = 0;
     cache_target_full_ratio_micro = 0;
+    cache_local_mode_default_fast = false;
     hit_set_params = HitSet::Params();
     hit_set_period = 0;
     hit_set_count = 0;
@@ -1359,7 +1375,7 @@ public:
   uint32_t cache_target_dirty_ratio_micro; ///< cache: fraction of target to leave dirty
   uint32_t cache_target_dirty_high_ratio_micro; ///<cache: fraction of  target to flush with high speed
   uint32_t cache_target_full_ratio_micro;  ///< cache: fraction of target to fill before we evict in earnest
-
+  bool cache_local_mode_default_fast; ///< cache: store new object into fast dev by default
   uint32_t cache_min_flush_age;  ///< minimum age (seconds) before we can flush
   uint32_t cache_min_evict_age;  ///< minimum age (seconds) before we can evict
 
@@ -1421,6 +1437,7 @@ public:
       cache_target_dirty_ratio_micro(0),
       cache_target_dirty_high_ratio_micro(0),
       cache_target_full_ratio_micro(0),
+      cache_local_mode_default_fast(false),
       cache_min_flush_age(0),
       cache_min_evict_age(0),
       hit_set_params(),
@@ -1656,6 +1673,9 @@ struct object_stat_sum_t {
   int64_t num_objects_pinned;
   int64_t num_objects_missing;
   int64_t num_legacy_snapsets; ///< upper bound on pre-luminous-style SnapSets
+  int64_t num_bytes_fast;    // objects in bytes on fast tier
+  int64_t num_objects_fast; // number of objects on fast tier
+  int64_t num_promote_kb;
 
   object_stat_sum_t()
     : num_bytes(0),
@@ -1684,7 +1704,10 @@ struct object_stat_sum_t {
       num_evict_mode_some(0), num_evict_mode_full(0),
       num_objects_pinned(0),
       num_objects_missing(0),
-      num_legacy_snapsets(0)
+      num_legacy_snapsets(0),
+      num_bytes_fast(0),
+      num_objects_fast(0),
+      num_promote_kb(0)
   {}
 
   void floor(int64_t f) {
@@ -1724,6 +1747,9 @@ struct object_stat_sum_t {
     FLOOR(num_evict_mode_full);
     FLOOR(num_objects_pinned);
     FLOOR(num_legacy_snapsets);
+    FLOOR(num_bytes_fast);
+    FLOOR(num_objects_fast);
+    FLOOR(num_promote_kb);
 #undef FLOOR
   }
 
@@ -1781,6 +1807,9 @@ struct object_stat_sum_t {
     SPLIT(num_evict_mode_full);
     SPLIT(num_objects_pinned);
     SPLIT_PRESERVE_NONZERO(num_legacy_snapsets);
+    SPLIT(num_bytes_fast);
+    SPLIT(num_objects_fast);
+    SPLIT(num_promote_kb);
 #undef SPLIT
 #undef SPLIT_PRESERVE_NONZERO
   }
@@ -1838,7 +1867,10 @@ struct object_stat_sum_t {
         sizeof(num_evict_mode_full) +
         sizeof(num_objects_pinned) +
         sizeof(num_objects_missing) +
-        sizeof(num_legacy_snapsets)
+        sizeof(num_legacy_snapsets) +
+        sizeof(num_bytes_fast) +
+        sizeof(num_objects_fast) +
+        sizeof(num_promote_kb)
       ,
       "object_stat_sum_t have padding");
   }
@@ -4171,7 +4203,7 @@ struct pg_nls_response_t {
   list<librados::ListObjectImpl> entries;
 
   void encode(bufferlist& bl) const {
-    ENCODE_START(1, 1, bl);
+    ENCODE_START(2, 1, bl);
     ::encode(handle, bl);
     __u32 n = (__u32)entries.size();
     ::encode(n, bl);
@@ -4179,11 +4211,12 @@ struct pg_nls_response_t {
       ::encode(i->nspace, bl);
       ::encode(i->oid, bl);
       ::encode(i->locator, bl);
+      ::encode(i->on_fast, bl);
     }
     ENCODE_FINISH(bl);
   }
   void decode(bufferlist::iterator& bl) {
-    DECODE_START(1, bl);
+    DECODE_START(2, bl);
     ::decode(handle, bl);
     __u32 n;
     ::decode(n, bl);
@@ -4193,6 +4226,8 @@ struct pg_nls_response_t {
       ::decode(i.nspace, bl);
       ::decode(i.oid, bl);
       ::decode(i.locator, bl);
+      if (struct_v >= 2)
+        ::decode(i.on_fast, bl);
       entries.push_back(i);
     }
     DECODE_FINISH(bl);
@@ -4727,6 +4762,24 @@ struct object_info_t {
   static ps_t legacy_object_locator_to_ps(const object_t &oid, 
 					  const object_locator_t &loc);
 
+  bool test_alloc_hint_flag(uint32_t f) const {
+    return (alloc_hint_flags & f) == f;
+  }
+  bool is_on_tier() const {
+    return test_alloc_hint_flag(CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER);
+  }
+  void set_alloc_hint_flag(uint32_t f) {
+    alloc_hint_flags = (uint32_t)(alloc_hint_flags | f);
+  }
+  void clear_alloc_hint_flag(uint32_t f) {
+    alloc_hint_flags = (uint32_t)(alloc_hint_flags & ~f);
+  }
+  void set_on_tier() {
+    set_alloc_hint_flag(CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER);
+  }
+  void clear_on_tier() {
+    clear_alloc_hint_flag(CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER);
+  }
   bool test_flag(flag_t f) const {
     return (flags & f) == f;
   }

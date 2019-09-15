@@ -708,7 +708,8 @@ void FileStore::collect_metadata(map<string,string> *pm)
   }
 }
 
-int FileStore::statfs(struct store_statfs_t *buf0)
+int FileStore::statfs(struct store_statfs_t *buf0,
+                      struct store_statfs_t *buf1)
 {
   struct statfs buf;
   buf0->reset();
@@ -4956,7 +4957,8 @@ int FileStore::collection_list(const coll_t& c,
 			       const ghobject_t& orig_start,
 			       const ghobject_t& end,
 			       int max,
-			       vector<ghobject_t> *ls, ghobject_t *next)
+			       vector<ghobject_t> *ls,
+                               ghobject_t *next)
 {
   ghobject_t start = orig_start;
   if (start.is_max())

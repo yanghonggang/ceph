@@ -110,6 +110,7 @@ bluestore=0
 rgw_frontend="civetweb"
 rgw_compression=""
 lockdep=${LOCKDEP:-1}
+withtier=0
 
 filestore_path=
 
@@ -156,6 +157,7 @@ usage=$usage"\t--cache <pool>: enable cache tiering on pool\n"
 usage=$usage"\t--short: short object names only; necessary for ext4 dev\n"
 usage=$usage"\t--nolockdep disable lockdep\n"
 usage=$usage"\t--multimds <count> allow multimds with maximum active count\n"
+usage=$usage"\t--with_tier enable bluestore tier\n"
 
 usage_exit() {
 	printf "$usage"
@@ -312,6 +314,9 @@ case $1 in
     --nolockdep )
             lockdep=0
             ;;
+    --with_tier )
+            withtier=1
+            ;;
     --multimds)
         CEPH_MAX_MDS="$2"
         shift
@@ -442,6 +447,11 @@ EOF
         lockdep = true
 EOF
 	fi
+        if [ "$withtier" -eq 1 ] ; then
+                wconf << EOF
+        bluestore_block_fast_create = true
+EOF
+        fi
 	if [ "$cephx" -eq 1 ] ; then
 		wconf <<EOF
         auth cluster required = cephx

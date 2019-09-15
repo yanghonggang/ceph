@@ -1100,6 +1100,10 @@ std::vector<Option> get_global_options() {
     .set_default(.95)
     .set_description(""),
 
+    Option("mon_osd_tier_full_ratio", Option::TYPE_FLOAT, Option::LEVEL_ADVANCED)
+    .set_default(.95)
+    .set_description(""),
+
     Option("mon_osd_backfillfull_ratio", Option::TYPE_FLOAT, Option::LEVEL_ADVANCED)
     .set_default(.90)
     .set_description(""),
@@ -1665,6 +1669,10 @@ std::vector<Option> get_global_options() {
     .set_default(.02)
     .set_description(""),
 
+    Option("osd_agent_skip_migrate", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+    .set_default(false)
+    .set_description(""),
+
     Option("osd_uuid", Option::TYPE_UUID, Option::LEVEL_ADVANCED)
     .set_default(uuid_d())
     .set_description(""),
@@ -1829,6 +1837,10 @@ std::vector<Option> get_global_options() {
     .set_default(10)
     .set_description(""),
 
+    Option("osd_pool_default_cache_local_mode_fast", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+    .set_default(false)
+    .set_description("create new object on fast dev by default"),
+
     Option("osd_hit_set_min_size", Option::TYPE_INT, Option::LEVEL_ADVANCED)
     .set_default(1000)
     .set_description(""),
@@ -1841,6 +1853,14 @@ std::vector<Option> get_global_options() {
     .set_default(".ceph-internal")
     .set_description(""),
 
+    Option("osd_hit_set_on_slow", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+    .set_default(true)
+    .set_description("store hit set objects on slow dev by default"),
+
+    Option("osd_tier_inject_cache_mode_full", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+    .set_default(false)
+    .set_description("force cache mode to full, for test only"),
+
     Option("osd_tier_promote_max_objects_sec", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
     .set_default(25)
     .set_description(""),
@@ -1848,6 +1868,10 @@ std::vector<Option> get_global_options() {
     Option("osd_tier_promote_max_bytes_sec", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
     .set_default(5_M)
     .set_description(""),
+
+    Option("osd_tier_force_writeback", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+    .set_default(false)
+    .set_description("force not to proxy write under writeback mode"),
 
     Option("osd_tier_default_cache_mode", Option::TYPE_STR, Option::LEVEL_ADVANCED)
     .set_default("writeback")
@@ -2555,6 +2579,10 @@ std::vector<Option> get_global_options() {
     .set_default(2_hr)
     .set_description(""),
 
+    Option("osd_scrub_mismatch_core", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+    .set_default(false)
+    .set_description("core when mismatch encountered"),
+
     Option("osd_class_dir", Option::TYPE_STR, Option::LEVEL_ADVANCED)
     .set_default(CEPH_LIBDIR "/rados-classes")
     .set_description(""),
@@ -3152,6 +3180,14 @@ std::vector<Option> get_global_options() {
     .set_default(-1)
     .set_description(""),
 
+    Option("bdev_enable_discard", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+    .set_default(false)
+    .set_description(""),
+
+    Option("bdev_async_discard", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+    .set_default(false)
+    .set_description(""),
+
     Option("bluefs_alloc_size", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
     .set_default(1_M)
     .set_description(""),
@@ -3301,6 +3337,22 @@ std::vector<Option> get_global_options() {
     .add_see_also("bluestore_block_wal_path")
     .add_see_also("bluestore_block_wal_size"),
 
+    Option("bluestore_block_fast_path", Option::TYPE_STR, Option::LEVEL_DEV)
+    .set_default("")
+    .add_tag("mkfs")
+    .set_description("Path to fast block device/file"),
+
+    Option("bluestore_block_fast_size", Option::TYPE_UINT, Option::LEVEL_DEV)
+    .set_default(1_G)
+    .add_tag("mkfs")
+    .set_description("Size of file to create for backing bluestore fast tier"),
+
+    Option("bluestore_block_fast_create", Option::TYPE_BOOL, Option::LEVEL_DEV)
+    .set_default(false)
+    .add_tag("mkfs")
+    .set_description("Create bluestore_block_fast_path if it doesn't exist")
+    .add_see_also("bluestore_block_fast_path").add_see_also("bluestore_block_fast_size"),
+
     Option("bluestore_block_preallocate_file", Option::TYPE_BOOL, Option::LEVEL_DEV)
     .set_default(false)
     .add_tag("mkfs")
@@ -3312,6 +3364,12 @@ std::vector<Option> get_global_options() {
     .set_safe()
     .set_description("Default checksum algorithm to use")
     .set_long_description("crc32c, xxhash32, and xxhash64 are available.  The _16 and _8 variants use only a subset of the bits for more compact (but less reliable) checksumming."),
+
+    Option("bluestore_retry_disk_reads", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
+    .set_default(3)
+    .set_min_max(0, 255)
+    .set_description("Number of read retries on checksum validation error")
+    .set_long_description("Retries to read data from the disk this many times when checksum validation fails to handle spurious read errors gracefully."),
 
     Option("bluestore_csum_min_block", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
     .set_default(4096)
@@ -3327,20 +3385,20 @@ std::vector<Option> get_global_options() {
     .add_see_also("bluestore_csum_min_block"),
 
     Option("bluestore_min_alloc_size", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
-    .set_default(0)
+    .set_default(32_K)
     .add_tag("mkfs")
     .set_description("Minimum allocation size to allocate for an object")
     .set_long_description("A smaller allocation size generally means less data is read and then rewritten when a copy-on-write operation is triggered (e.g., when writing to something that was recently snapshotted).  Similarly, less data is journaled before performing an overwrite (writes smaller than min_alloc_size must first pass through the BlueStore journal).  Larger values of min_alloc_size reduce the amount of metadata required to describe the on-disk layout and reduce overall fragmentation."),
 
     Option("bluestore_min_alloc_size_hdd", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
-    .set_default(64_K)
+    .set_default(32_K)
     .add_tag("mkfs")
-    .set_description("Default min_alloc_size value for rotational media"),
+    .set_description("Default min_alloc_size value for rotational media, default val is 64K. if you want to use osd tier, this val must be 32K"),
 
     Option("bluestore_min_alloc_size_ssd", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
-    .set_default(16_K)
+    .set_default(32_K)
     .add_tag("mkfs")
-    .set_description("Default min_alloc_size value for non-rotational (solid state)  media"),
+    .set_description("Default min_alloc_size value for non-rotational (solid state)  media, default val is 16K, if you want to use os tier, this val must be 32K"),
 
     Option("bluestore_max_alloc_size", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
     .set_default(0)
@@ -3422,14 +3480,14 @@ std::vector<Option> get_global_options() {
     .set_description(""),
 
     Option("bluestore_max_blob_size_hdd", Option::TYPE_UINT, Option::LEVEL_DEV)
-    .set_default(512_K)
+    .set_default(128_K)
     .set_safe()
-    .set_description(""),
+    .set_description("default val is 512K, but if you want to use osd tier, this val must be 128K"),
 
     Option("bluestore_max_blob_size_ssd", Option::TYPE_UINT, Option::LEVEL_DEV)
-    .set_default(64_K)
+    .set_default(128_K)
     .set_safe()
-    .set_description(""),
+    .set_description("default val is 64K, but if you want to use osd tier, this val must be 128K"),
 
     Option("bluestore_compression_required_ratio", Option::TYPE_FLOAT, Option::LEVEL_ADVANCED)
     .set_default(.875)
@@ -3681,6 +3739,10 @@ std::vector<Option> get_global_options() {
     .set_description(""),
 
     Option("bluestore_debug_random_read_err", Option::TYPE_FLOAT, Option::LEVEL_DEV)
+    .set_default(0)
+    .set_description(""),
+
+    Option("bluestore_inject_migration_err", Option::TYPE_BOOL, Option::LEVEL_DEV)
     .set_default(0)
     .set_description(""),
 

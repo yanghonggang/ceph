@@ -449,6 +449,7 @@ public:
   void dump_osd_stats(Formatter *f) const;
   void dump_delta(Formatter *f) const;
   void dump_filtered_pg_stats(Formatter *f, set<pg_t>& pgs) const;
+  void dump_filtered_pg_stats_per_osd(Formatter *f, set<pg_t>& pgs) const;
   void dump_pool_stats_full(const OSDMap &osd_map, stringstream *ss,
 			    Formatter *f, bool verbose) const override {
     get_rules_avail(osd_map, &avail_space_by_rule);
@@ -477,6 +478,7 @@ public:
   void dump_osd_stats(ostream& ss) const;
   void dump_osd_sum_stats(ostream& ss) const;
   void dump_filtered_pg_stats(ostream& ss, set<pg_t>& pgs) const;
+  void dump_filtered_pg_stats_per_osd(ostream& ss, set<pg_t>& pgs) const;
 
   void dump_osd_perf_stats(Formatter *f) const;
   void print_osd_perf_stats(std::ostream *ss) const;

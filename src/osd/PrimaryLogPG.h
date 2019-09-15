@@ -544,6 +544,8 @@ public:
     ObjectContextRef clone_obc;    // if we created a clone
     ObjectContextRef snapset_obc;  // if we created/deleted a snapdir
 
+    int rval;
+
     // FIXME: we may want to kill this msgr hint off at some point!
     boost::optional<int> data_off = boost::none;
 
@@ -851,7 +853,7 @@ protected:
   void repop_all_applied(RepGather *repop);
   void repop_all_committed(RepGather *repop);
   void eval_repop(RepGather*);
-  void issue_repop(RepGather *repop, OpContext *ctx);
+  void issue_repop(RepGather *repop, OpContext *ctx, bool ignore_rval = false);
   RepGather *new_repop(
     OpContext *ctx,
     ObjectContextRef obc,
@@ -915,6 +917,9 @@ protected:
     return agent_work(max, max);
   }
   bool agent_work(int max, int agent_flush_quota) override;
+  bool agent_maybe_migrate(ObjectContextRef& obc, 
+                           bool promote = false,
+                           bool read_promote = false); ///< maybe migrate 
   bool agent_maybe_flush(ObjectContextRef& obc);  ///< maybe flush
   bool agent_maybe_evict(ObjectContextRef& obc, bool after_flush);  ///< maybe evict
 
@@ -1112,7 +1117,8 @@ protected:
   void write_update_size_and_usage(object_stat_sum_t& stats, object_info_t& oi,
 				   interval_set<uint64_t>& modified, uint64_t offset,
 				   uint64_t length, bool write_full=false);
-  void add_interval_usage(interval_set<uint64_t>& s, object_stat_sum_t& st);
+  void add_interval_usage(interval_set<uint64_t>& s, object_stat_sum_t& st,
+                          bool fast);
 
 
   enum class cache_result_t {
@@ -1162,6 +1168,14 @@ protected:
       in_hit_set,
       nullptr);
   }
+
+  /**
+   * Trigger a synchronous migration if needed. 
+   */
+  bool maybe_promote(ObjectContextRef obc,
+                     bool in_hit_set,
+                     uint32_t recency,
+                     OpRequestRef op);
 
   /**
    * This helper function checks if a promotion is needed.

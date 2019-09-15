@@ -938,6 +938,7 @@ rm -rf %{buildroot}
 %{_bindir}/monmaptool
 %{_bindir}/osdmaptool
 %{_bindir}/ceph-kvstore-tool
+%{_bindir}/calc_crc
 %{_bindir}/ceph-run
 %{_bindir}/ceph-detect-init
 %{_libexecdir}/systemd/system-preset/50-ceph.preset

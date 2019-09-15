@@ -45,7 +45,9 @@ public:
 
   virtual void release(
     uint64_t offset, uint64_t length) = 0;
-
+  /* Bulk release. Implementations may override this method to handle the whole
+   * set at once. This could save e.g. unnecessary mutex dance. */
+  virtual void release(const interval_set<uint64_t>& release_set) = 0;
   virtual void dump() = 0;
 
   virtual void init_add_free(uint64_t offset, uint64_t length) = 0;

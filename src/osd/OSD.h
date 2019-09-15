@@ -146,9 +146,15 @@ enum {
   l_osd_stat_bytes_used,
   l_osd_stat_bytes_avail,
 
+  l_osd_stat_bytes_fast,
+  l_osd_stat_bytes_used_fast,
+  l_osd_stat_bytes_avail_fast,
+
   l_osd_copyfrom,
 
   l_osd_tier_promote,
+  l_osd_tier_read_promote,
+  l_osd_tier_write_promote,
   l_osd_tier_flush,
   l_osd_tier_flush_fail,
   l_osd_tier_try_flush,
@@ -170,8 +176,14 @@ enum {
   l_osd_object_ctx_cache_total,
 
   l_osd_op_cache_hit,
+  l_osd_op_cache_miss,
+  l_osd_op_cache_read_hit,
+  l_osd_op_cache_write_hit,
+  l_osd_op_cache_demote_dirty,
+  l_osd_op_cache_demote_clean,
   l_osd_tier_flush_lat,
   l_osd_tier_promote_lat,
+  l_osd_tier_demote_lat,
   l_osd_tier_r_lat,
 
   l_osd_pg_info,
@@ -1060,7 +1072,8 @@ public:
   void update_osd_stat(vector<int>& hb_peers);
   osd_stat_t set_osd_stat(const struct store_statfs_t &stbuf,
                           vector<int>& hb_peers,
-			  int num_pgs);
+			  int num_pgs,
+                          const struct store_statfs_t &stbuf_fast);
   osd_stat_t get_osd_stat() {
     Mutex::Locker l(stat_lock);
     ++seq;
@@ -1103,10 +1116,11 @@ private:
       return INVALID;
   }
   double cur_ratio;  ///< current utilization
+  double cur_fast_ratio;  ///< current fast dev utilization
   mutable int64_t injectfull = 0;
   s_names injectfull_state = NONE;
   float get_failsafe_full_ratio();
-  void check_full_status(float ratio);
+  void check_full_status(float ratio, float fast_ratio=0);
   bool _check_full(s_names type, ostream &ss) const;
 public:
   bool check_failsafe_full(ostream &ss) const;
@@ -1120,7 +1134,10 @@ public:
   bool need_fullness_update();  ///< osdmap state needs update
   void set_injectfull(s_names type, int64_t count);
   bool check_osdmap_full(const set<pg_shard_t> &missing_on);
-
+  float get_fast_full_ratio() {
+    Mutex::Locker l(full_status_lock);
+    return cur_fast_ratio;
+  }
 
   // -- epochs --
 private:

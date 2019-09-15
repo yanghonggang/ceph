@@ -76,6 +76,16 @@ static ostream& _prefix(std::ostream *_dout, T *pg) {
 
 #include <errno.h>
 
+#ifdef PG_DEBUG_FAST
+#define debug_fast_add(soid) fast_add(soid, __func__, __LINE__)
+#define debug_fast_remove fast_remove
+#define debug_fast_dump fast_dump
+#else
+#define debug_fast_add(...)
+#define debug_fast_remove(...)
+#define debug_fast_dump(...)
+#endif
+
 MEMPOOL_DEFINE_OBJECT_FACTORY(PrimaryLogPG, replicatedpg, osd);
 
 PGLSFilter::PGLSFilter() : cct(nullptr)
@@ -186,17 +196,21 @@ class PrimaryLogPG::C_PG_ObjectContext : public Context {
 
 class PrimaryLogPG::C_OSD_OndiskWriteUnlock : public Context {
   ObjectContextRef obc, obc2, obc3;
+  int *rval;
   public:
   C_OSD_OndiskWriteUnlock(
     ObjectContextRef o,
     ObjectContextRef o2 = ObjectContextRef(),
-    ObjectContextRef o3 = ObjectContextRef()) : obc(o), obc2(o2), obc3(o3) {}
+    ObjectContextRef o3 = ObjectContextRef(),
+    int *r = NULL) : obc(o), obc2(o2), obc3(o3), rval(r) {}
   void finish(int r) override {
     obc->ondisk_write_unlock();
     if (obc2)
       obc2->ondisk_write_unlock();
     if (obc3)
       obc3->ondisk_write_unlock();
+    if (rval)
+      *rval = r;
   }
 };
 
@@ -1271,16 +1285,19 @@ void PrimaryLogPG::do_pg_op(OpRequestRef op)
 	  if (filter && !pgls_filter(filter, candidate, filter_out))
 	    continue;
 
-          dout(20) << "pgnls item 0x" << std::hex
+          dout(15) << "pgnls item 0x" << std::hex
             << candidate.get_hash()
             << ", rev 0x" << hobject_t::_reverse_bits(candidate.get_hash())
             << std::dec << " "
-            << candidate.oid.name << dendl;
+            << candidate.oid.name
+            << " , fast " << candidate.is_on_fast()
+            << dendl;
 
 	  librados::ListObjectImpl item;
 	  item.nspace = candidate.get_namespace();
 	  item.oid = candidate.oid.name;
 	  item.locator = candidate.get_key();
+	  item.on_fast = candidate.is_on_fast();
 	  response.entries.push_back(item);
 	}
 
@@ -2189,6 +2206,9 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
       op->hitset_inserted = true;
       if (hit_set->is_full() ||
           hit_set_start_stamp + pool.info.hit_set_period <= m->get_recv_stamp()) {
+        dout(10) << __func__ << " hit set full? "
+                 << hit_set->is_full()
+                 << dendl;
         hit_set_persist();
       }
     }
@@ -2204,6 +2224,17 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
 			       write_ordered,
 			       obc))
     return;
+  }
+
+  if ((pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL) && obc.get()) {
+    if (m->ops[0].op.op != CEPH_OSD_OP_DELETE) {
+      uint32_t recency = op->may_write() ? 
+                           pool.info.min_write_recency_for_promote :
+                           pool.info.min_read_recency_for_promote; 
+      maybe_promote(obc, in_hit_set, recency, op);
+    } else {
+      dout(20) << __func__ << ": skip CEPH_OSD_OP_DELETE, don't promote" << dendl;
+    }
   }
 
   if (maybe_handle_cache(op,
@@ -2462,6 +2493,12 @@ PrimaryLogPG::cache_result_t PrimaryLogPG::maybe_handle_cache_detail(
   if (pool.info.cache_mode == pg_pool_t::CACHEMODE_NONE)
     return cache_result_t::NOOP;
 
+  if (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL) {
+    dout(10) << __func__ << ": ignoring cache due to cache mode local"
+            << dendl;
+    return cache_result_t::NOOP;
+  }
+
   if (op &&
       op->get_req() &&
       op->get_req()->get_type() == CEPH_MSG_OSD_OP &&
@@ -2546,7 +2583,8 @@ PrimaryLogPG::cache_result_t PrimaryLogPG::maybe_handle_cache_detail(
     }
 
     if (op->may_write() || op->may_cache()) {
-      if (can_proxy_write) {
+      if (can_proxy_write && !cct->_conf->osd_tier_force_writeback) {
+        dout(20) << __func__ << " do proxy write" << dendl;
         do_proxy_write(op, missing_oid);
       } else {
 	// promote if can't proxy the write
@@ -2664,6 +2702,94 @@ PrimaryLogPG::cache_result_t PrimaryLogPG::maybe_handle_cache_detail(
     assert(0 == "unrecognized cache_mode");
   }
   return cache_result_t::NOOP;
+}
+
+bool PrimaryLogPG::maybe_promote(ObjectContextRef obc,
+                                 bool in_hit_set,
+                                 uint32_t recency,
+                                 OpRequestRef op)
+{
+  bool may_write = op->may_write();
+  bool pin = op->need_promote();
+
+  dout(10) << __func__
+          << " " << obc->obs.oi
+          << ", in_hit_set " << in_hit_set
+          << ", recency " << recency
+          << ", pin " << pin
+          << dendl;
+
+  if (obc->obs.oi.is_on_tier()) {
+    osd->logger->inc(l_osd_op_cache_hit);
+    if (may_write)
+      osd->logger->inc(l_osd_op_cache_write_hit);
+    else
+      osd->logger->inc(l_osd_op_cache_read_hit);
+
+    return false;
+  }
+
+  if (!obc->obs.exists) {
+    dout(10) << __func__
+             << " " << obc->obs.oi
+             << " not exist, skip"
+             << dendl;
+    return false;
+  } 
+  osd->logger->inc(l_osd_op_cache_miss);
+
+  if (pin) {
+    // force promotion when pin an object
+    dout(15) << __func__
+            << " " << obc->obs.oi
+            << " force promotion"
+            << dendl;
+    return agent_maybe_migrate(obc, true, may_write);
+  }
+  switch (recency) {
+  case 0:
+    break;
+  case 1:
+    // Check if in the current hit set
+    if (in_hit_set) {
+      break;
+    } else {
+      // not promoting
+      return false;
+    }
+    break;
+  default:
+    {
+      unsigned count = (int)in_hit_set;
+      if (count) {
+	// Check if in other hit sets
+	const hobject_t& oid = obc->obs.oi.soid;
+	for (map<time_t,HitSetRef>::reverse_iterator itor =
+	       agent_state->hit_set_map.rbegin();
+	     itor != agent_state->hit_set_map.rend();
+	     ++itor) {
+	  if (!itor->second->contains(oid)) {
+	    break;
+	  }
+	  ++count;
+	  if (count >= recency) {
+	    break;
+	  }
+	}
+      }
+      if (count >= recency) {
+	break;
+      }
+      return false;	// not promoting
+    }
+    break;
+  }
+
+  if (osd->promote_throttle()) {
+    dout(10) << __func__ << " promote throttled" << dendl;
+    return false;
+  }
+  return agent_maybe_migrate(obc, true, may_write);
 }
 
 bool PrimaryLogPG::maybe_promote(ObjectContextRef obc,
@@ -3372,7 +3498,9 @@ void PrimaryLogPG::execute_ctx(OpContext *ctx)
 				    ctx->user_at_version);
 	}
 	reply->add_flags(CEPH_OSD_FLAG_ACK | CEPH_OSD_FLAG_ONDISK);
-	dout(10) << " sending reply on " << *m << " " << reply << dendl;
+        reply->set_result(ctx->rval);
+	dout(10) << " sending reply on " << *m << " " << reply
+                 << " , rval is " << ctx->rval << dendl;
 	osd->send_message_osd_client(reply, m->get_connection());
 	ctx->sent_reply = true;
 	ctx->op->mark_commit_sent();
@@ -3789,7 +3917,8 @@ int PrimaryLogPG::trim_object(
   
     snapid_t last = coid.snap;
     ctx->delta_stats.num_bytes -= snapset.get_clone_bytes(last);
-
+    if (coi.is_on_tier())
+      ctx->delta_stats.num_bytes_fast -= snapset.get_clone_bytes(last);
     if (p != snapset.clones.begin()) {
       // not the oldest... merge overlap into next older clone
       vector<snapid_t>::iterator n = p - 1;
@@ -3800,13 +3929,22 @@ int PrimaryLogPG::trim_object(
       if (adjust_prev_bytes)
 	ctx->delta_stats.num_bytes -= snapset.get_clone_bytes(*n);
 
+      if (coi.is_on_tier())
+        ctx->delta_stats.num_bytes_fast -= snapset.get_clone_bytes(*n);
+
       snapset.clone_overlap[*n].intersection_of(
 	snapset.clone_overlap[*p]);
 
       if (adjust_prev_bytes)
 	ctx->delta_stats.num_bytes += snapset.get_clone_bytes(*n);
+      if (coi.is_on_tier())
+        ctx->delta_stats.num_bytes_fast += snapset.get_clone_bytes(*n);
     }
     ctx->delta_stats.num_objects--;
+    if (coi.is_on_tier()) {
+      ctx->delta_stats.num_objects_fast--;
+      debug_fast_remove(coi.soid);
+    }
     if (coi.is_dirty())
       ctx->delta_stats.num_objects_dirty--;
     if (coi.is_omap())
@@ -3910,6 +4048,10 @@ int PrimaryLogPG::trim_object(
       derr << "removing snap head" << dendl;
       object_info_t& oi = ctx->snapset_obc->obs.oi;
       ctx->delta_stats.num_objects--;
+      if (oi.is_on_tier()) {
+        ctx->delta_stats.num_objects_fast--;
+        debug_fast_remove(oi.soid);
+      }
       if (oi.is_dirty()) {
 	ctx->delta_stats.num_objects_dirty--;
       }
@@ -4475,6 +4617,24 @@ void PrimaryLogPG::maybe_create_new_object(
     obs.oi.new_object();
     if (!ignore_transaction)
       ctx->op_t->create(obs.oi.soid);
+    if (!ignore_transaction && (agent_state && agent_state->evict_mode ==
+         TierAgentState::EVICT_MODE_IDLE) &&
+        pool.info.cache_local_mode_default_fast) {
+      // force create on fast device
+      obs.oi.set_on_tier();
+      ctx->op_t->set_alloc_hint(obs.oi.soid, obs.oi.expected_object_size,
+                                obs.oi.expected_write_size,
+                                obs.oi.alloc_hint_flags);
+      dout(10) << __func__ << " add fast tier alloc hint for " << obs.oi << dendl;
+    }
+    if (agent_state)
+      dout(10) << __func__ << " " << agent_state->get_evict_mode_name()
+              << " " << obs.oi
+              << dendl;
+    if (obs.oi.is_on_tier()) {
+      ctx->delta_stats.num_objects_fast++;
+      debug_fast_add(obs.oi.soid);
+    }
   } else if (obs.oi.is_whiteout()) {
     dout(10) << __func__ << " clearing whiteout on " << obs.oi.soid << dendl;
     ctx->new_obs.oi.clear_flag(object_info_t::FLAG_WHITEOUT);
@@ -5276,7 +5436,8 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	if (obs.exists && !oi.is_whiteout()) {
 	  ::encode(oi.size, osd_op.outdata);
 	  ::encode(oi.mtime, osd_op.outdata);
-	  dout(10) << "stat oi has " << oi.size << " " << oi.mtime << dendl;
+	  ::encode(oi.is_on_tier(), osd_op.outdata);
+	  dout(15) << "stat oi: " << oi << dendl;
 	} else {
 	  result = -ENOENT;
 	  dout(10) << "stat oi object does not exist" << dendl;
@@ -5762,15 +5923,68 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       ++ctx->num_write;
       {
 	tracepoint(osd, do_osd_op_pre_setallochint, soid.oid.name.c_str(), soid.snap.val, op.alloc_hint.expected_object_size, op.alloc_hint.expected_write_size);
-	maybe_create_new_object(ctx);
-	oi.expected_object_size = op.alloc_hint.expected_object_size;
-	oi.expected_write_size = op.alloc_hint.expected_write_size;
-	oi.alloc_hint_flags = op.alloc_hint.flags;
-        t->set_alloc_hint(soid, op.alloc_hint.expected_object_size,
-                          op.alloc_hint.expected_write_size,
-			  op.alloc_hint.flags);
-        ctx->delta_stats.num_wr++;
+        bool migration_hint = false;
         result = 0;
+        // when set-alloc-hint op is mixed with other ops, just treat it as
+        // general set-alloc-hint op, not migration hint.
+        if (obs.exists && (ops.size() == 1)) {
+          migration_hint = true;
+
+          if ((oi.alloc_hint_flags ^
+              op.alloc_hint.flags) & CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER) {
+            dout(15) << __func__ << " HINT migration op changed:" << oi << dendl;
+            // migrate from fast dev to slow dev
+            if (oi.alloc_hint_flags & CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER) {
+              ctx->delta_stats.num_bytes_fast -= oi.size;
+              ctx->delta_stats.num_objects_fast--;
+              oi.clear_on_tier();
+              debug_fast_remove(soid);
+            } else {
+              float dev_full_ratio = osd->get_fast_full_ratio();
+
+              // maybe pool cache mode is not local
+              if ((agent_state && 
+                   (agent_state->evict_mode ==
+                    TierAgentState::EVICT_MODE_FULL) &&
+                   (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL)) ||
+                  dev_full_ratio > cct->_conf->mon_osd_tier_full_ratio) {
+                dout(10) << __func__
+                         << " agent stat: " << ((agent_state &&
+                            (agent_state->evict_mode ==
+                             TierAgentState::EVICT_MODE_FULL)) ? "full" : "na")
+                         << ", tier is FULL(dev " << dev_full_ratio
+                         << "), obj " << oi << dendl;
+                result = -ENOSPC;
+                break;
+              }
+              ctx->delta_stats.num_bytes_fast += oi.size;
+              ctx->delta_stats.num_objects_fast++;
+              oi.set_on_tier();
+              debug_fast_add(soid);
+            }
+          } else {
+            dout(15) << __func__ << " HINT migration op no change:" << oi << dendl;
+            break; // no change
+          }
+        }
+        // Note: set alloc_hint_flag before call maybe_create_new_object()
+        //       so we can know whether this is a object should be stored
+        //       on fast device
+        if (!migration_hint) {
+	  oi.expected_object_size = op.alloc_hint.expected_object_size;
+ 	  oi.expected_write_size = op.alloc_hint.expected_write_size;
+          // don't modify the fast bit
+          oi.alloc_hint_flags = (op.alloc_hint.flags &
+                                 ~CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER) |
+                                (oi.alloc_hint_flags &
+                                 CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER);
+        }
+	maybe_create_new_object(ctx);
+        dout(15) << __func__ << " HINT final, " << oi << dendl;
+        t->set_alloc_hint(soid, oi.expected_object_size,
+                          oi.expected_write_size,
+			  oi.alloc_hint_flags);
+        ctx->delta_stats.num_wr++;
       }
       break;
 
@@ -5830,6 +6044,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	    if (op.extent.truncate_size != oi.size) {
 	      ctx->delta_stats.num_bytes -= oi.size;
 	      ctx->delta_stats.num_bytes += op.extent.truncate_size;
+              if (oi.is_on_tier()) {
+                ctx->delta_stats.num_bytes_fast -= oi.size;
+                ctx->delta_stats.num_bytes_fast += op.extent.truncate_size;
+              }
 	      oi.size = op.extent.truncate_size;
 	    }
 	  } else {
@@ -5853,6 +6071,31 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	    t->nop(soid);
 	  }
 	} else {
+          // cache is full, before extend an object on fast dev,
+          // migrate it to slow dev first(hope slow dev is not full)
+          if (agent_state && (op.extent.offset + op.extent.length > oi.size) && 
+              (agent_state->evict_mode == TierAgentState::EVICT_MODE_FULL) &&
+              (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL) &&
+              oi.is_on_tier()) {
+            dout(15) << __func__ << " cache is full, migrate to slow dev first: "
+                    << oi
+                    << ", op is write" 
+                    << dendl;
+
+            oi.clear_on_tier();
+            debug_fast_remove(soid);
+
+            ctx->delta_stats.num_bytes_fast -= oi.size;
+            ctx->delta_stats.num_objects_fast --;
+
+            t->set_alloc_hint(oi.soid, oi.expected_object_size,
+                              oi.expected_write_size, obs.oi.alloc_hint_flags);
+            // auto unpin this object
+            if (oi.is_cache_pinned()) {
+              oi.clear_flag(object_info_t::FLAG_CACHE_PIN);
+              ctx->delta_stats.num_objects_pinned--;
+            }
+          }
 	  t->write(
 	    soid, op.extent.offset, op.extent.length, osd_op.indata, op.flags);
 	}
@@ -5891,6 +6134,33 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	} else if (obs.exists && op.extent.length < oi.size) {
 	  t->truncate(soid, op.extent.length);
 	}
+        if (obs.exists && op.extent.length > oi.size){
+          // cache is full, before extend an object on fast dev,
+          // migrate it to slow dev first(hope slow dev is not full)
+          if (agent_state && 
+              (agent_state->evict_mode == TierAgentState::EVICT_MODE_FULL) &&
+              (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL) &&
+              oi.is_on_tier()) {
+            dout(15) << __func__ << " cache is full, migrate to slow dev first: "
+                    << oi
+                    << ", op is writefull" 
+                    << dendl;
+
+            oi.clear_on_tier();
+            debug_fast_remove(soid);
+
+            ctx->delta_stats.num_bytes_fast -= oi.size;
+            ctx->delta_stats.num_objects_fast --;
+
+            t->set_alloc_hint(oi.soid, oi.expected_object_size,
+                              oi.expected_write_size, obs.oi.alloc_hint_flags);
+            // auto unpin this object
+            if (oi.is_cache_pinned()) {
+              oi.clear_flag(object_info_t::FLAG_CACHE_PIN);
+              ctx->delta_stats.num_objects_pinned--;
+            }
+          }
+        }
 	if (op.extent.length) {
 	  t->write(soid, 0, op.extent.length, osd_op.indata, op.flags);
 	}
@@ -6012,6 +6282,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	if (op.extent.offset != oi.size) {
 	  ctx->delta_stats.num_bytes -= oi.size;
 	  ctx->delta_stats.num_bytes += op.extent.offset;
+          if (oi.is_on_tier()) {
+            ctx->delta_stats.num_bytes_fast -= oi.size;
+            ctx->delta_stats.num_bytes_fast += op.extent.offset;
+          }
 	  oi.size = op.extent.offset;
 	}
 	ctx->delta_stats.num_wr++;
@@ -6113,7 +6387,8 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
     case CEPH_OSD_OP_CACHE_PIN:
       tracepoint(osd, do_osd_op_pre_cache_pin, soid.oid.name.c_str(), soid.snap.val);
       if ((!pool.info.is_tier() ||
-	  pool.info.cache_mode == pg_pool_t::CACHEMODE_NONE)) {
+	  pool.info.cache_mode == pg_pool_t::CACHEMODE_NONE) &&
+          pool.info.cache_mode != pg_pool_t::CACHEMODE_LOCAL) {
         result = -EINVAL;
         dout(10) << " pin object is only allowed on the cache tier " << dendl;
         break;
@@ -6124,7 +6399,13 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	  result = -ENOENT;
 	  break;
 	}
-
+        // auto promote maybe failed
+        if ((pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL) &&
+            !oi.is_on_tier()) {
+          dout(0) << __func__ << ", auto promote failed for " << oi << dendl;
+          result = -ENOSPC;
+          break;
+        }
 	if (!oi.is_cache_pinned()) {
 	  oi.set_flag(object_info_t::FLAG_CACHE_PIN);
 	  ctx->modify = true;
@@ -6138,7 +6419,8 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
     case CEPH_OSD_OP_CACHE_UNPIN:
       tracepoint(osd, do_osd_op_pre_cache_unpin, soid.oid.name.c_str(), soid.snap.val);
       if ((!pool.info.is_tier() ||
-	  pool.info.cache_mode == pg_pool_t::CACHEMODE_NONE)) {
+	  pool.info.cache_mode == pg_pool_t::CACHEMODE_NONE) &&
+          pool.info.cache_mode != pg_pool_t::CACHEMODE_LOCAL) {
         result = -EINVAL;
         dout(10) << " pin object is only allowed on the cache tier " << dendl;
         break;
@@ -6208,6 +6490,8 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	  obs.oi.clear_flag(object_info_t::FLAG_OMAP);
 	}
 	ctx->delta_stats.num_bytes -= oi.size;
+        if (oi.is_on_tier())
+          ctx->delta_stats.num_bytes_fast -= oi.size;
 	oi.size = 0;
 	oi.new_object();
 	oi.user_version = target_version;
@@ -6874,8 +7158,10 @@ inline int PrimaryLogPG::_delete_oid(
   PGTransaction* t = ctx->op_t.get();
 
   // cache: cache: set whiteout on delete?
+  // don't whiteout in CACHEMODE_LOCAL
   bool whiteout = false;
-  if (pool.info.cache_mode != pg_pool_t::CACHEMODE_NONE
+  if (pool.info.cache_mode != pg_pool_t::CACHEMODE_LOCAL &&
+      pool.info.cache_mode != pg_pool_t::CACHEMODE_NONE
       && !no_whiteout
       && !try_no_whiteout) {
     whiteout = true;
@@ -6919,8 +7205,12 @@ inline int PrimaryLogPG::_delete_oid(
   if (soid.is_snap()) {
     assert(ctx->obc->ssc->snapset.clone_overlap.count(soid.snap));
     ctx->delta_stats.num_bytes -= ctx->obc->ssc->snapset.get_clone_bytes(soid.snap);
+    if (oi.is_on_tier())
+      ctx->delta_stats.num_bytes_fast -= ctx->obc->ssc->snapset.get_clone_bytes(soid.snap);
   } else {
     ctx->delta_stats.num_bytes -= oi.size;
+    if (oi.is_on_tier())
+      ctx->delta_stats.num_bytes_fast -= oi.size;
   }
   oi.size = 0;
   oi.new_object();
@@ -6947,6 +7237,10 @@ inline int PrimaryLogPG::_delete_oid(
 
   // delete the head
   ctx->delta_stats.num_objects--;
+  if (oi.is_on_tier()) {
+    ctx->delta_stats.num_objects_fast--;
+    debug_fast_remove(oi.soid);
+  }
   if (soid.is_snap())
     ctx->delta_stats.num_object_clones--;
   if (oi.is_whiteout()) {
@@ -6960,6 +7254,7 @@ inline int PrimaryLogPG::_delete_oid(
   if ((legacy || snapset.is_legacy()) && soid.is_head()) {
     snapset.head_exists = false;
   }
+  oi.clear_on_tier();
   obs.exists = false;
   return 0;
 }
@@ -7089,6 +7384,10 @@ int PrimaryLogPG::_rollback_to(OpContext *ctx, ceph_osd_op& op)
       maybe_create_new_object(ctx, true);
       ctx->delta_stats.num_bytes -= obs.oi.size;
       ctx->delta_stats.num_bytes += rollback_to->obs.oi.size;
+      if (obs.oi.is_on_tier()) {
+        ctx->delta_stats.num_bytes_fast -= obs.oi.size;
+        ctx->delta_stats.num_bytes_fast += rollback_to->obs.oi.size;
+      }
       obs.oi.size = rollback_to->obs.oi.size;
       if (rollback_to->obs.oi.is_data_digest())
 	obs.oi.set_data_digest(rollback_to->obs.oi.data_digest);
@@ -7222,6 +7521,9 @@ void PrimaryLogPG::make_writeable(OpContext *ctx)
     snap_oi->version = ctx->at_version;
     snap_oi->prior_version = ctx->obs->oi.version;
     snap_oi->copy_user_bits(ctx->obs->oi);
+    // snap objects and head object should on the same device
+    if (ctx->obs->oi.is_on_tier())
+      snap_oi->set_on_tier();
 
     bool legacy = ctx->new_snapset.is_legacy() ||
       get_osdmap()->require_osd_release < CEPH_RELEASE_LUMINOUS;
@@ -7230,8 +7532,12 @@ void PrimaryLogPG::make_writeable(OpContext *ctx)
     }
 
     _make_clone(ctx, ctx->op_t.get(), ctx->clone_obc, soid, coid, snap_oi);
-    
+
     ctx->delta_stats.num_objects++;
+    if (snap_oi->is_on_tier()) {
+      ctx->delta_stats.num_objects_fast++;
+      debug_fast_add(snap_oi->soid);
+    }
     if (snap_oi->is_dirty()) {
       ctx->delta_stats.num_objects_dirty++;
       osd->logger->inc(l_osd_tier_dirty);
@@ -7277,7 +7583,8 @@ void PrimaryLogPG::make_writeable(OpContext *ctx)
       interval_set<uint64_t> &newest_overlap = ctx->new_snapset.clone_overlap.rbegin()->second;
       ctx->modified_ranges.intersection_of(newest_overlap);
       // modified_ranges is still in use by the clone
-      add_interval_usage(ctx->modified_ranges, ctx->delta_stats);
+      add_interval_usage(ctx->modified_ranges, ctx->delta_stats,
+                         ctx->obs->oi.is_on_tier());
       newest_overlap.subtract(ctx->modified_ranges);
     }
   }
@@ -7312,16 +7619,23 @@ void PrimaryLogPG::write_update_size_and_usage(object_stat_sum_t& delta_stats, o
     uint64_t new_size = offset + length;
     delta_stats.num_bytes -= oi.size;
     delta_stats.num_bytes += new_size;
+    if (oi.is_on_tier()) {
+      delta_stats.num_bytes_fast -= oi.size;
+      delta_stats.num_bytes_fast += new_size;
+    }
     oi.size = new_size;
   }
   delta_stats.num_wr++;
   delta_stats.num_wr_kb += SHIFT_ROUND_UP(length, 10);
 }
 
-void PrimaryLogPG::add_interval_usage(interval_set<uint64_t>& s, object_stat_sum_t& delta_stats)
+void PrimaryLogPG::add_interval_usage(interval_set<uint64_t>& s,
+       object_stat_sum_t& delta_stats, bool fast)
 {
   for (interval_set<uint64_t>::const_iterator p = s.begin(); p != s.end(); ++p) {
     delta_stats.num_bytes += p.get_len();
+    if (fast)
+      delta_stats.num_bytes_fast += p.get_len();
   }
 }
 
@@ -9358,7 +9672,8 @@ void PrimaryLogPG::eval_repop(RepGather *repop)
   }
 }
 
-void PrimaryLogPG::issue_repop(RepGather *repop, OpContext *ctx)
+void PrimaryLogPG::issue_repop(RepGather *repop, OpContext *ctx,
+                               bool ignore_rval)
 {
   FUNCTRACE();
   const hobject_t& soid = ctx->obs->oi.soid;
@@ -9400,7 +9715,8 @@ void PrimaryLogPG::issue_repop(RepGather *repop, OpContext *ctx)
   Context *onapplied_sync = new C_OSD_OndiskWriteUnlock(
     ctx->obc,
     ctx->clone_obc,
-    unlock_snapset_obc ? ctx->snapset_obc : ObjectContextRef());
+    unlock_snapset_obc ? ctx->snapset_obc : ObjectContextRef(),
+    ignore_rval ? nullptr : &ctx->rval);
   if (!(ctx->log.empty())) {
     assert(ctx->at_version >= projected_last_update);
     projected_last_update = ctx->at_version;
@@ -9507,7 +9823,7 @@ void PrimaryLogPG::simple_opc_submit(OpContextUPtr ctx)
 {
   RepGather *repop = new_repop(ctx.get(), ctx->obc, ctx->reqid.tid);
   dout(20) << __func__ << " " << repop << dendl;
-  issue_repop(repop, ctx.get());
+  issue_repop(repop, ctx.get(), true);
   eval_repop(repop);
   calc_trim_to();
   repop->put();
@@ -9850,6 +10166,7 @@ ObjectContextRef PrimaryLogPG::get_object_context(
     (pg_log.get_log().objects.count(soid) &&
       pg_log.get_log().objects.find(soid)->second->op ==
       pg_log_entry_t::LOST_REVERT));
+  dout(10) << __func__ << " , soid " << soid << dendl;
   ObjectContextRef obc = object_contexts.lookup(soid);
   osd->logger->inc(l_osd_object_ctx_cache_total);
   if (obc) {
@@ -9902,6 +10219,7 @@ ObjectContextRef PrimaryLogPG::get_object_context(
 
     assert(oi.soid.pool == (int64_t)info.pgid.pool());
 
+    dout(10) << __func__ << ", oi.soid " << oi.soid << dendl;
     obc = object_contexts.lookup_or_create(oi.soid);
     obc->destructor_callback = new C_PG_ObjectContext(this, obc.get());
     obc->obs.oi = oi;
@@ -10216,9 +10534,16 @@ void PrimaryLogPG::add_object_context_to_pg_stat(ObjectContextRef obc, pg_stat_t
   object_stat_sum_t stat;
 
   stat.num_bytes += oi.size;
-
-  if (oi.soid.snap != CEPH_SNAPDIR)
+  if (oi.is_on_tier()) {
+    stat.num_bytes_fast += oi.size;
+  }
+  if (oi.soid.snap != CEPH_SNAPDIR) {
     stat.num_objects++;
+    if (oi.is_on_tier()) {
+      stat.num_objects_fast++;
+      debug_fast_add(oi.soid);
+    }
+  }
   if (oi.is_dirty())
     stat.num_objects_dirty++;
   if (oi.is_whiteout())
@@ -10238,10 +10563,13 @@ void PrimaryLogPG::add_object_context_to_pg_stat(ObjectContextRef obc, pg_stat_t
     // subtract off clone overlap
     if (obc->ssc->snapset.clone_overlap.count(oi.soid.snap)) {
       interval_set<uint64_t>& o = obc->ssc->snapset.clone_overlap[oi.soid.snap];
+      bool on_tier = oi.is_on_tier();
       for (interval_set<uint64_t>::const_iterator r = o.begin();
 	   r != o.end();
 	   ++r) {
 	stat.num_bytes -= r.get_len();
+        if (on_tier)
+          stat.num_bytes_fast -= r.get_len();
       }	  
     }
   }
@@ -12847,11 +13175,28 @@ void PrimaryLogPG::hit_set_persist()
   obc->obs.exists = true;
   obc->obs.oi.set_data_digest(bl.crc32c(-1));
 
+  // force create hit object on fast dev
+  bool local_mode = (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL);
+  bool fast = (local_mode && (agent_state->evict_mode !=
+      TierAgentState::EVICT_MODE_FULL));
+  if (fast && !cct->_conf->osd_hit_set_on_slow) {
+    obc->obs.oi.set_on_tier();
+    ctx->op_t->set_alloc_hint(obc->obs.oi.soid,
+                              obc->obs.oi.size,
+                              obc->obs.oi.size,
+                              obc->obs.oi.alloc_hint_flags);
+  }
+
   ctx->new_obs = obc->obs;
 
   obc->ssc->snapset.head_exists = true;
   ctx->new_snapset = obc->ssc->snapset;
 
+  if (fast && !cct->_conf->osd_hit_set_on_slow) {
+    ctx->delta_stats.num_objects_fast++;
+    ctx->delta_stats.num_bytes_fast += bl.length();
+    debug_fast_add(obc->obs.oi.soid);
+  }
   ctx->delta_stats.num_objects++;
   ctx->delta_stats.num_objects_hit_set_archive++;
   ctx->delta_stats.num_bytes += bl.length();
@@ -12918,6 +13263,11 @@ void PrimaryLogPG::hit_set_trim(OpContextUPtr &ctx, unsigned max)
     ObjectContextRef obc = get_object_context(oid, false);
     assert(obc);
     --ctx->delta_stats.num_objects;
+    if (obc->obs.oi.is_on_tier()) {
+      --ctx->delta_stats.num_objects_fast;
+      ctx->delta_stats.num_bytes_fast -= obc->obs.oi.size;
+      debug_fast_remove(oid);
+    }
     --ctx->delta_stats.num_objects_hit_set_archive;
     ctx->delta_stats.num_bytes -= obc->obs.oi.size;
     ctx->delta_stats.num_bytes_hit_set_archive -= obc->obs.oi.size;
@@ -12940,9 +13290,10 @@ void PrimaryLogPG::agent_setup()
   assert(is_locked());
   if (!is_active() ||
       !is_primary() ||
-      pool.info.cache_mode == pg_pool_t::CACHEMODE_NONE ||
+      ((pool.info.cache_mode == pg_pool_t::CACHEMODE_NONE ||
       pool.info.tier_of < 0 ||
-      !get_osdmap()->have_pg_pool(pool.info.tier_of)) {
+      !get_osdmap()->have_pg_pool(pool.info.tier_of)) &&
+      pool.info.cache_mode != pg_pool_t::CACHEMODE_LOCAL)) {
     agent_clear();
     return;
   }
@@ -13007,8 +13358,11 @@ bool PrimaryLogPG::agent_work(int start_max, int agent_flush_quota)
 
   agent_load_hit_sets();
 
-  const pg_pool_t *base_pool = get_osdmap()->get_pg_pool(pool.info.tier_of);
-  assert(base_pool);
+  const pg_pool_t *base_pool = nullptr;
+  if (pool.info.cache_mode != pg_pool_t::CACHEMODE_LOCAL) {
+    base_pool = get_osdmap()->get_pg_pool(pool.info.tier_of);
+    assert(base_pool);
+  }
 
   int ls_min = 1;
   int ls_max = cct->_conf->osd_pool_default_cache_max_evict_check_size;
@@ -13028,6 +13382,10 @@ bool PrimaryLogPG::agent_work(int start_max, int agent_flush_quota)
   for (vector<hobject_t>::iterator p = ls.begin();
        p != ls.end();
        ++p) {
+    if (!p->is_on_fast()) {
+      dout(20) << __func__ << " skip (not on fast dev) " << *p << dendl;
+      continue;
+    }
     if (p->nspace == cct->_conf->osd_hit_set_namespace) {
       dout(20) << __func__ << " skip (hit set) " << *p << dendl;
       osd->logger->inc(l_osd_agent_skip);
@@ -13072,17 +13430,21 @@ bool PrimaryLogPG::agent_work(int start_max, int agent_flush_quota)
     }
 
     // be careful flushing omap to an EC pool.
-    if (!base_pool->supports_omap() &&
+    if ((pool.info.cache_mode != pg_pool_t::CACHEMODE_LOCAL) &&
+        !base_pool->supports_omap() &&
 	obc->obs.oi.is_omap()) {
       dout(20) << __func__ << " skip (omap to EC) " << obc->obs.oi << dendl;
       osd->logger->inc(l_osd_agent_skip);
       continue;
     }
 
-    if (agent_state->evict_mode != TierAgentState::EVICT_MODE_IDLE &&
-	agent_maybe_evict(obc, false))
-      ++started;
-    else if (agent_state->flush_mode != TierAgentState::FLUSH_MODE_IDLE &&
+    if (agent_state->evict_mode != TierAgentState::EVICT_MODE_IDLE) {
+      if ((pool.info.cache_mode != pg_pool_t::CACHEMODE_LOCAL) &&
+           agent_maybe_evict(obc, false))
+        ++started;
+      else if (p->is_on_fast() && agent_maybe_migrate(obc, false))
+        ++started;
+    } else if (agent_state->flush_mode != TierAgentState::FLUSH_MODE_IDLE &&
              agent_flush_quota > 0 && agent_maybe_flush(obc)) {
       ++started;
       --agent_flush_quota;
@@ -13188,6 +13550,189 @@ void PrimaryLogPG::agent_load_hit_sets()
       }
     }
   }
+}
+
+bool PrimaryLogPG::agent_maybe_migrate(ObjectContextRef& obc, bool promote,
+                                       bool read_promote)
+{
+  // skip any migration
+  if (cct->_conf->osd_agent_skip_migrate)
+    return false;
+
+  dout(15) << __func__ << " " << obc->obs.oi
+          << ", promote " << promote
+          << dendl;
+  const hobject_t& soid = obc->obs.oi.soid;
+
+  // already on the right dev?
+  bool fast = (obc->obs.oi.alloc_hint_flags &
+               CEPH_OSD_ALLOC_HINT_FLAG_FAST_TIER);
+  if (promote == fast) {
+    dout(15) << __func__
+            << " skip (already on the right dev) " << obc->obs.oi.soid
+            << dendl;
+    osd->logger->inc(l_osd_agent_skip);
+    return true;
+  }
+
+  if (promote && agent_state && agent_state->evict_mode ==
+      TierAgentState::EVICT_MODE_FULL) {
+    dout(15) << __func__ << " skip (cache dev full) " << obc->obs.oi << dendl;
+    osd->logger->inc(l_osd_agent_skip);
+    return false;
+  }
+
+  if (scrubber.write_blocked_by_scrub(obc->obs.oi.soid)) {
+    dout(10) << __func__ << "skip (scrubbing) " << obc->obs.oi << dendl;
+    osd->logger->inc(l_osd_agent_skip);
+    return false;
+  }
+  if (obc->is_blocked()) {
+    dout(15) << __func__ << " skip (blocked) " << obc->obs.oi << dendl;
+    osd->logger->inc(l_osd_agent_skip);
+    return false;
+  }
+  if (obc->obs.oi.is_cache_pinned() && !promote) {
+    dout(5) << __func__ << " skip (cache_pinned) " << obc->obs.oi
+            << ", promote " << promote << dendl;
+    osd->logger->inc(l_osd_agent_skip);
+    return false;
+  }
+
+  if (osd->agent_is_active_oid(obc->obs.oi.soid)) {
+    dout(15) << __func__ << " skip (flushing) " << obc->obs.oi << dendl;
+    osd->logger->inc(l_osd_agent_skip);
+    return false;
+  }
+  if (!obc->obs.oi.watchers.empty()) {
+    dout(15) << __func__ << " skip (watchers) " << obc->obs.oi << dendl;
+    osd->logger->inc(l_osd_agent_skip);
+    return false;
+  }
+  if (soid.nspace == cct->_conf->osd_hit_set_namespace) {
+    dout(15) << __func__ << " skip (hit set) " << obc->obs.oi << dendl;
+    return false;
+  }
+  // NOTE:
+  // we don't need to wait for all clone objects are demoted
+   
+  bool evict_mode_full =
+        (agent_state->evict_mode == TierAgentState::EVICT_MODE_FULL);
+
+  // is this object cold enough?
+  if (!promote) { // flush
+    // too young?
+    utime_t now = ceph_clock_now();
+    utime_t ob_local_mtime;
+    if (obc->obs.oi.local_mtime != utime_t()) {
+      ob_local_mtime = obc->obs.oi.local_mtime;
+    } else {
+      ob_local_mtime = obc->obs.oi.mtime;
+    }
+    if (!evict_mode_full &&
+        (ob_local_mtime + utime_t(pool.info.cache_min_evict_age, 0) > now)) {
+      dout(15) << __func__ << " skip (too young) " << obc->obs.oi << dendl;
+      osd->logger->inc(l_osd_agent_skip);
+      return false;
+    }
+
+    // demote all objects in evict mode full
+    if (!evict_mode_full) {
+      int temp = 0;
+      uint64_t temp_upper = 0, temp_lower = 0;
+      if (hit_set)
+        agent_estimate_temp(soid, &temp);
+      agent_state->temp_hist.add(temp);
+      agent_state->temp_hist.get_position_micro(temp, &temp_lower, &temp_upper);
+      dout(15) << __func__
+              << " temp " << temp
+              << " pos " << temp_lower << "-" << temp_upper
+              << ", evict_effort " << agent_state->evict_effort
+              << dendl;
+      if (1000000 - temp_upper >= agent_state->evict_effort)
+        return false;
+    }
+  } else {
+    if (evict_mode_full) {
+      dout(15) << __func__
+              << " skip(evict_mode_full) " << obc->obs.oi
+              << dendl;
+      return false;
+    } 
+  }
+
+  // kick off async migration
+  OpContextUPtr ctx = simple_opc_create(obc);
+  if (!ctx->lock_manager.get_lock_type(
+       ObjectContext::RWState::RWWRITE,
+       obc->obs.oi.soid,
+       obc,
+       OpRequestRef())) {
+    close_op_ctx(ctx.release());
+    dout(10) << __func__ << " skip (cannot get lock) " << obc->obs.oi << dendl;
+    return false; 
+  }
+
+  ctx->at_version = get_next_version();
+  object_info_t& oi = ctx->new_obs.oi;
+
+  osd->agent_start_op(soid);
+  // obc->start_block();
+
+  auto start = ceph_clock_now();
+  ctx->register_on_success(
+    [this, soid, oi, promote, read_promote, start, obc]() {
+      // obc->stop_block();
+      // kick_object_context_blocked(obc);
+      osd->agent_finish_op(soid);
+
+      if (promote) {
+        osd->promote_finish(oi.size);
+        if (read_promote)
+          osd->logger->inc(l_osd_tier_read_promote);
+        else
+          osd->logger->inc(l_osd_tier_write_promote);
+
+        osd->logger->inc(l_osd_tier_promote);
+        osd->logger->tinc(l_osd_tier_promote_lat, ceph_clock_now() - start);
+      } else {
+        if (oi.is_dirty())
+          osd->logger->inc(l_osd_op_cache_demote_dirty);
+        else
+          osd->logger->inc(l_osd_op_cache_demote_clean);
+
+        osd->logger->inc(l_osd_tier_evict);
+        osd->logger->tinc(l_osd_tier_demote_lat, ceph_clock_now() - start);
+      }
+    });
+  PGTransaction *t = ctx->op_t.get();
+  // change hint flags to trigger a migration
+  if (promote) {
+    assert(!oi.is_on_tier());
+    ctx->delta_stats.num_bytes_fast += oi.size;
+    ctx->delta_stats.num_objects_fast++;
+    info.stats.stats.sum.num_promote++;
+    ctx->delta_stats.num_promote_kb += SHIFT_ROUND_UP(obc->obs.oi.size, 10);
+    oi.set_on_tier();
+    debug_fast_add(soid);
+  } else {
+    assert(oi.is_on_tier());
+    ctx->delta_stats.num_bytes_fast -= oi.size;
+    ctx->delta_stats.num_objects_fast--;
+    ctx->delta_stats.num_evict_kb += SHIFT_ROUND_UP(obc->obs.oi.size, 10);
+    oi.clear_on_tier();
+    debug_fast_remove(soid);
+    info.stats.stats.sum.num_evict++;
+  }
+  t->set_alloc_hint(soid, oi.expected_object_size, oi.expected_write_size,
+                    oi.alloc_hint_flags);
+  ctx->delta_stats.num_wr++;
+  ctx->delta_stats.num_rd++;
+  
+  finish_ctx(ctx.get(), pg_log_entry_t::MODIFY);
+  simple_opc_submit(std::move(ctx));
+ 
+  return true;
 }
 
 bool PrimaryLogPG::agent_maybe_flush(ObjectContextRef& obc)
@@ -13391,6 +13936,7 @@ void PrimaryLogPG::agent_choose_mode_restart()
 bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
 {
   bool requeued = false;
+  bool local_mode = (pool.info.cache_mode == pg_pool_t::CACHEMODE_LOCAL);
   // Let delay play out
   if (agent_state->delaying) {
     dout(20) << __func__ << this << " delaying, ignored" << dendl;
@@ -13414,29 +13960,33 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
   // adjust (effective) user objects down based on the number
   // of HitSet objects, which should not count toward our total since
   // they cannot be flushed.
-  uint64_t unflushable = info.stats.stats.sum.num_objects_hit_set_archive;
+  uint64_t unflushable = local_mode ? 0 :
+                           info.stats.stats.sum.num_objects_hit_set_archive;
 
   // also exclude omap objects if ec backing pool
   const pg_pool_t *base_pool = get_osdmap()->get_pg_pool(pool.info.tier_of);
-  assert(base_pool);
-  if (!base_pool->supports_omap())
+  assert(local_mode || base_pool);
+  if (!local_mode && !base_pool->supports_omap())
     unflushable += info.stats.stats.sum.num_objects_omap;
 
-  uint64_t num_user_objects = info.stats.stats.sum.num_objects;
+  uint64_t num_user_objects = local_mode ? info.stats.stats.sum.num_objects_fast :
+                                info.stats.stats.sum.num_objects;
   if (num_user_objects > unflushable)
     num_user_objects -= unflushable;
   else
     num_user_objects = 0;
 
-  uint64_t num_user_bytes = info.stats.stats.sum.num_bytes;
-  uint64_t unflushable_bytes = info.stats.stats.sum.num_bytes_hit_set_archive;
+  uint64_t num_user_bytes = local_mode ? info.stats.stats.sum.num_bytes_fast :
+    info.stats.stats.sum.num_bytes;
+  uint64_t unflushable_bytes = local_mode ? 0 :
+                                 info.stats.stats.sum.num_bytes_hit_set_archive;
   num_user_bytes -= unflushable_bytes;
   uint64_t num_overhead_bytes = osd->store->estimate_objects_overhead(num_user_objects);
   num_user_bytes += num_overhead_bytes;
 
   // also reduce the num_dirty by num_objects_omap
   int64_t num_dirty = info.stats.stats.sum.num_objects_dirty;
-  if (!base_pool->supports_omap()) {
+  if (!local_mode && !base_pool->supports_omap()) {
     if (num_dirty > info.stats.stats.sum.num_objects_omap)
       num_dirty -= info.stats.stats.sum.num_objects_omap;
     else
@@ -13449,7 +13999,9 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
 	   << " evict_mode: "
 	   << TierAgentState::get_evict_mode_name(agent_state->evict_mode)
 	   << " num_objects: " << info.stats.stats.sum.num_objects
+	   << " num_objects_fast: " << info.stats.stats.sum.num_objects_fast
 	   << " num_bytes: " << info.stats.stats.sum.num_bytes
+	   << " num_bytes_fast: " << info.stats.stats.sum.num_bytes_fast
 	   << " num_objects_dirty: " << info.stats.stats.sum.num_objects_dirty
 	   << " num_objects_omap: " << info.stats.stats.sum.num_objects_omap
 	   << " num_dirty: " << num_dirty
@@ -13463,6 +14015,8 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
   // get dirty, full ratios
   uint64_t dirty_micro = 0;
   uint64_t full_micro = 0;
+  uint64_t dev_full_micro = 0;
+  uint64_t full_objects_micro = 0;
   if (pool.info.target_max_bytes && num_user_objects > 0) {
     uint64_t avg_size = num_user_bytes / num_user_objects;
     dirty_micro =
@@ -13472,48 +14026,73 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
       num_user_objects * avg_size * 1000000 /
       MAX(pool.info.target_max_bytes / divisor, 1);
   }
+
+  // even user forgot to set target_max_objects/target_max_bytes,
+  // a number still can be calculated from dev's full ratio.
+  if (local_mode) {
+    float dev_full_ratio = osd->get_fast_full_ratio();
+    // let's leave 0.1 safe margin?
+    dev_full_micro = MIN(1000000, 
+                                  uint64_t(dev_full_ratio * 1000000 * 1.1));
+ 
+    dout(10) << __func__
+            << " dev_full_micro = " << dev_full_micro
+            << ", full_micro = " << full_micro
+            << dendl;
+    full_micro = MAX(dev_full_micro, full_micro);
+  }
+
   if (pool.info.target_max_objects > 0) {
     uint64_t dirty_objects_micro =
       num_dirty * 1000000 /
       MAX(pool.info.target_max_objects / divisor, 1);
     if (dirty_objects_micro > dirty_micro)
       dirty_micro = dirty_objects_micro;
-    uint64_t full_objects_micro =
+    full_objects_micro =
       num_user_objects * 1000000 /
       MAX(pool.info.target_max_objects / divisor, 1);
     if (full_objects_micro > full_micro)
       full_micro = full_objects_micro;
   }
-  dout(20) << __func__ << " dirty " << ((float)dirty_micro / 1000000.0)
-	   << " full " << ((float)full_micro / 1000000.0)
+  dout(10) << __func__ << " dirty " << ((float)dirty_micro / 1000000.0)
+	   << ", full " << ((float)full_micro / 1000000.0)
+	   << ", dev_full " << ((float)dev_full_micro / 1000000.0)
+	   << ", full_objects " << ((float)full_objects_micro / 1000000.0)
+           << ", divisor " << divisor
 	   << dendl;
 
   // flush mode
-  uint64_t flush_target = pool.info.cache_target_dirty_ratio_micro;
-  uint64_t flush_high_target = pool.info.cache_target_dirty_high_ratio_micro;
-  uint64_t flush_slop = (float)flush_target * cct->_conf->osd_agent_slop;
-  if (restart || agent_state->flush_mode == TierAgentState::FLUSH_MODE_IDLE) {
-    flush_target += flush_slop;
-    flush_high_target += flush_slop;
-  } else {
-    flush_target -= MIN(flush_target, flush_slop);
-    flush_high_target -= MIN(flush_high_target, flush_slop);
-  }
+  if (!local_mode) {
+    uint64_t flush_target = pool.info.cache_target_dirty_ratio_micro;
+    uint64_t flush_high_target = pool.info.cache_target_dirty_high_ratio_micro;
+    uint64_t flush_slop = (float)flush_target * cct->_conf->osd_agent_slop;
+    if (restart || agent_state->flush_mode == TierAgentState::FLUSH_MODE_IDLE) {
+      flush_target += flush_slop;
+      flush_high_target += flush_slop;
+    } else {
+      flush_target -= MIN(flush_target, flush_slop);
+      flush_high_target -= MIN(flush_high_target, flush_slop);
+    }
 
-  if (dirty_micro > flush_high_target) {
-    flush_mode = TierAgentState::FLUSH_MODE_HIGH;
-  } else if (dirty_micro > flush_target) {
-    flush_mode = TierAgentState::FLUSH_MODE_LOW;
+    if (dirty_micro > flush_high_target) {
+      flush_mode = TierAgentState::FLUSH_MODE_HIGH;
+    } else if (dirty_micro > flush_target) {
+      flush_mode = TierAgentState::FLUSH_MODE_LOW;
+    }
   }
 
   // evict mode
-  uint64_t evict_target = pool.info.cache_target_full_ratio_micro;
+  uint64_t evict_target = local_mode ?
+                            pool.info.cache_target_dirty_ratio_micro :
+                            pool.info.cache_target_full_ratio_micro;
   uint64_t evict_slop = (float)evict_target * cct->_conf->osd_agent_slop;
   if (restart || agent_state->evict_mode == TierAgentState::EVICT_MODE_IDLE)
     evict_target += evict_slop;
   else
     evict_target -= MIN(evict_target, evict_slop);
 
+  // in local mode, always calculate evict_effort, as we depend on this val
+  // to do flush job
   if (full_micro > 1000000) {
     // evict anything clean
     evict_mode = TierAgentState::EVICT_MODE_FULL;
@@ -13534,13 +14113,18 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
     if (evict_effort < inc)
       evict_effort = inc;
     assert(evict_effort >= inc && evict_effort <= 1000000);
-    dout(30) << __func__ << " evict_effort " << was << " quantized by " << inc << " to " << evict_effort << dendl;
+    dout(10) << __func__ << " evict_effort " << was << " quantized by " << inc << " to " << evict_effort << dendl;
   }
+    dout(10) << __func__ << " evict_effort " << evict_effort
+            << ", full_micro " << full_micro
+            << ", evict_target " << evict_target
+            << dendl;
   }
 
   skip_calc:
   bool old_idle = agent_state->is_idle();
-  if (flush_mode != agent_state->flush_mode) {
+  // don't need to update flush_mode when pool cache mode is local 
+  if (!local_mode && (flush_mode != agent_state->flush_mode)) {
     dout(5) << __func__ << " flush_mode "
 	    << TierAgentState::get_flush_mode_name(agent_state->flush_mode)
 	    << " -> "
@@ -13560,6 +14144,7 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
     }
     agent_state->flush_mode = flush_mode;
   }
+
   if (evict_mode != agent_state->evict_mode) {
     dout(5) << __func__ << " evict_mode "
 	    << TierAgentState::get_evict_mode_name(agent_state->evict_mode)
@@ -13588,6 +14173,10 @@ bool PrimaryLogPG::agent_choose_mode(bool restart, OpRequestRef op)
       info.stats.stats.sum.num_evict_mode_full = 0;
     }
     agent_state->evict_mode = evict_mode;
+  }
+  if (cct->_conf->osd_tier_inject_cache_mode_full) {
+    dout(5) << __func__ << ", force tier agent mode FULL" << dendl;
+    agent_state->evict_mode = TierAgentState::EVICT_MODE_FULL;
   }
   uint64_t old_effort = agent_state->evict_effort;
   if (evict_effort != agent_state->evict_effort) {
@@ -13884,11 +14473,16 @@ void PrimaryLogPG::scrub_snapshot_metadata(
       // A clone num_bytes will be added later when we have snapset
       if (!soid.is_snap()) {
 	stat.num_bytes += oi->size;
+        if (oi->is_on_tier())
+          stat.num_bytes_fast += oi->size;
       }
       if (soid.nspace == cct->_conf->osd_hit_set_namespace)
 	stat.num_bytes_hit_set_archive += oi->size;
 
       if (!soid.is_snapdir()) {
+        if (oi->is_on_tier()) {
+          stat.num_objects_fast++;
+        }
 	if (oi->is_dirty())
 	  ++stat.num_objects_dirty;
 	if (oi->is_whiteout())
@@ -14098,6 +14692,8 @@ void PrimaryLogPG::scrub_snapshot_metadata(
 	    soid_error.set_size_mismatch();
 	  } else {
             stat.num_bytes += snapset->get_clone_bytes(soid.snap);
+            if (oi->is_on_tier())
+              stat.num_bytes_fast += snapset->get_clone_bytes(soid.snap);
 	  }
         }
       }
@@ -14292,16 +14888,19 @@ void PrimaryLogPG::_scrub_finish()
 
   dout(10) << mode << " got "
 	   << scrub_cstat.sum.num_objects << "/" << info.stats.stats.sum.num_objects << " objects, "
+	   << scrub_cstat.sum.num_objects_fast << "/" << info.stats.stats.sum.num_objects_fast << " fast objects, "
 	   << scrub_cstat.sum.num_object_clones << "/" << info.stats.stats.sum.num_object_clones << " clones, "
 	   << scrub_cstat.sum.num_objects_dirty << "/" << info.stats.stats.sum.num_objects_dirty << " dirty, "
 	   << scrub_cstat.sum.num_objects_omap << "/" << info.stats.stats.sum.num_objects_omap << " omap, "
 	   << scrub_cstat.sum.num_objects_pinned << "/" << info.stats.stats.sum.num_objects_pinned << " pinned, "
 	   << scrub_cstat.sum.num_objects_hit_set_archive << "/" << info.stats.stats.sum.num_objects_hit_set_archive << " hit_set_archive, "
 	   << scrub_cstat.sum.num_bytes << "/" << info.stats.stats.sum.num_bytes << " bytes, "
+	   << scrub_cstat.sum.num_bytes_fast << "/" << info.stats.stats.sum.num_bytes_fast << " fast bytes, "
 	   << scrub_cstat.sum.num_bytes_hit_set_archive << "/" << info.stats.stats.sum.num_bytes_hit_set_archive << " hit_set_archive bytes."
 	   << dendl;
 
   if (scrub_cstat.sum.num_objects != info.stats.stats.sum.num_objects ||
+      scrub_cstat.sum.num_objects_fast != info.stats.stats.sum.num_objects_fast ||
       scrub_cstat.sum.num_object_clones != info.stats.stats.sum.num_object_clones ||
       (scrub_cstat.sum.num_objects_dirty != info.stats.stats.sum.num_objects_dirty &&
        !info.stats.dirty_stats_invalid) ||
@@ -14314,10 +14913,12 @@ void PrimaryLogPG::_scrub_finish()
       (scrub_cstat.sum.num_bytes_hit_set_archive != info.stats.stats.sum.num_bytes_hit_set_archive &&
        !info.stats.hitset_bytes_stats_invalid) ||
       scrub_cstat.sum.num_whiteouts != info.stats.stats.sum.num_whiteouts ||
-      scrub_cstat.sum.num_bytes != info.stats.stats.sum.num_bytes) {
+      scrub_cstat.sum.num_bytes != info.stats.stats.sum.num_bytes ||
+      scrub_cstat.sum.num_bytes_fast != info.stats.stats.sum.num_bytes_fast) {
     osd->clog->error() << info.pgid << " " << mode
 		      << " stat mismatch, got "
 		      << scrub_cstat.sum.num_objects << "/" << info.stats.stats.sum.num_objects << " objects, "
+		      << scrub_cstat.sum.num_objects_fast << "/" << info.stats.stats.sum.num_objects_fast << " fast objects, "
 		      << scrub_cstat.sum.num_object_clones << "/" << info.stats.stats.sum.num_object_clones << " clones, "
 		      << scrub_cstat.sum.num_objects_dirty << "/" << info.stats.stats.sum.num_objects_dirty << " dirty, "
 		      << scrub_cstat.sum.num_objects_omap << "/" << info.stats.stats.sum.num_objects_omap << " omap, "
@@ -14325,9 +14926,13 @@ void PrimaryLogPG::_scrub_finish()
 		      << scrub_cstat.sum.num_objects_hit_set_archive << "/" << info.stats.stats.sum.num_objects_hit_set_archive << " hit_set_archive, "
 		      << scrub_cstat.sum.num_whiteouts << "/" << info.stats.stats.sum.num_whiteouts << " whiteouts, "
 		      << scrub_cstat.sum.num_bytes << "/" << info.stats.stats.sum.num_bytes << " bytes, "
+		      << scrub_cstat.sum.num_bytes_fast << "/" << info.stats.stats.sum.num_bytes_fast << " fast bytes, "
 		      << scrub_cstat.sum.num_bytes_hit_set_archive << "/" << info.stats.stats.sum.num_bytes_hit_set_archive << " hit_set_archive bytes.";
     ++scrubber.shallow_errors;
-
+    debug_fast_dump();
+    if (cct->_conf->osd_scrub_mismatch_core) {
+      assert(0 == "osd_scrub_mismatch_core");
+    }
     if (repair) {
       ++scrubber.fixed;
       info.stats.stats = scrub_cstat;

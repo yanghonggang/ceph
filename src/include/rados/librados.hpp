@@ -57,6 +57,7 @@ namespace librados
     const std::string& get_nspace() const;
     const std::string& get_oid() const;
     const std::string& get_locator() const;
+    bool is_on_fast() const;
 
     ListObject();
     ~ListObject();
@@ -284,6 +285,7 @@ namespace librados
     ALLOC_HINT_FLAG_LONGLIVED = 128,
     ALLOC_HINT_FLAG_COMPRESSIBLE = 256,
     ALLOC_HINT_FLAG_INCOMPRESSIBLE = 512,
+    ALLOC_HINT_FLAG_FAST_TIER = (1U << 30),
   };
 
   /*
@@ -773,6 +775,9 @@ namespace librados
     int rmxattr(const std::string& oid, const char *name);
     int stat(const std::string& oid, uint64_t *psize, time_t *pmtime);
     int stat2(const std::string& oid, uint64_t *psize, struct timespec *pts);
+    int stat3(const std::string& oid, uint64_t *psize, time_t *pmtime,
+              bool *pon_fast);
+
     int exec(const std::string& oid, const char *cls, const char *method,
 	     bufferlist& inbl, bufferlist& outbl);
     /**
@@ -1062,6 +1067,10 @@ namespace librados
     int aio_rmxattr(const std::string& oid, AioCompletion *c, const char *name);
     int aio_stat(const std::string& oid, AioCompletion *c, uint64_t *psize, time_t *pmtime);
     int aio_stat2(const std::string& oid, AioCompletion *c, uint64_t *psize, struct timespec *pts);
+    int aio_set_alloc_hint(const std::string& oid, AioCompletion *c,
+                           uint64_t expected_object_size,
+                           uint64_t expected_write_size,
+                           uint32_t flags);
 
     /**
      * Cancel aio operation

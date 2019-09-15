@@ -51,6 +51,8 @@ public:
 
 private:
   string key;
+public:
+  bool fast = false; // on fast device, in memory member
 
   class hobject_t_max {};
 
@@ -89,7 +91,9 @@ public:
   bool is_meta() const {
     return pool == POOL_META;
   }
-
+  bool is_on_fast() const {
+    return fast;
+  }
   hobject_t() : snap(0), hash(0), max(false), pool(INT64_MIN) {
     build_hash_cache();
   }
@@ -113,18 +117,20 @@ public:
   }
 
   hobject_t(object_t oid, const string& key, snapid_t snap, uint32_t hash,
-	    int64_t pool, string nspace)
+	    int64_t pool, string nspace, bool fast = false)
     : oid(oid), snap(snap), hash(hash), max(false),
       pool(pool), nspace(nspace),
-      key(oid.name == key ? string() : key) {
+      key(oid.name == key ? string() : key),
+      fast(fast) {
     build_hash_cache();
   }
 
   hobject_t(const sobject_t &soid, const string &key, uint32_t hash,
-	    int64_t pool, string nspace)
+	    int64_t pool, string nspace, bool fast = false)
     : oid(soid.oid), snap(soid.snap), hash(hash), max(false),
       pool(pool), nspace(nspace),
-      key(soid.oid.name == key ? string() : key) {
+      key(soid.oid.name == key ? string() : key),
+      fast(fast) {
     build_hash_cache();
   }
 

@@ -25,9 +25,11 @@
 #include "acconfig.h"
 #include "aio.h"
 
+#include "include/interval_set.h"
 #define SPDK_PREFIX "spdk:"
 
 /// track in-flight io
+class BlockDevice;
 struct IOContext {
 private:
   std::mutex lock;
@@ -48,7 +50,8 @@ public:
   std::atomic_int num_pending = {0};
   std::atomic_int num_running = {0};
   bool allow_eio;
-
+  BlockDevice* dev = nullptr;
+  
   explicit IOContext(CephContext* cct, void *p, bool allow_eio = false)
     : cct(cct), priv(p), allow_eio(allow_eio)
     {}
@@ -59,6 +62,10 @@ public:
 
   bool has_pending_aios() {
     return num_pending.load();
+  }
+
+  bool has_running_aios() {
+    return num_running.load();
   }
 
   void aio_wait();
@@ -106,7 +113,7 @@ public:
   typedef void (*aio_callback_t)(void *handle, void *aio);
 
   static BlockDevice *create(
-    CephContext* cct, const std::string& path, aio_callback_t cb, void *cbpriv);
+    CephContext* cct, const std::string& path, aio_callback_t cb, void *cbpriv, aio_callback_t d_cb, void *d_cbpriv);
   virtual bool supported_bdev_label() { return true; }
   virtual bool is_rotational() { return rotational; }
 
@@ -144,6 +151,9 @@ public:
     IOContext *ioc,
     bool buffered) = 0;
   virtual int flush() = 0;
+  virtual int discard(uint64_t offset, uint64_t len) { return 0; }
+  virtual int queue_discard(interval_set<uint64_t> &to_release) { return -1; }
+  virtual void discard_drain() { return; }
 
   void queue_reap_ioc(IOContext *ioc);
   void reap_ioc();

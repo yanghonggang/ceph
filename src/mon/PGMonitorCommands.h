@@ -21,6 +21,9 @@ COMMAND("pg ls-by-pool "		\
         "name=poolstr,type=CephString " \
 	"name=states,type=CephString,n=N,req=false", \
 	"list pg with pool = [poolname]", "pg", "r", "cli,rest")
+COMMAND("pg osd-df-by-pool "		\
+        "name=poolstr,type=CephString", \
+	"list pg with pool = [poolname]", "pg", "r", "cli,rest")
 COMMAND("pg ls-by-primary " \
         "name=osd,type=CephOsdName " \
         "name=pool,type=CephInt,req=false " \

@@ -21,9 +21,11 @@
 #include "common/common_init.h"
 #include "common/TracepointProvider.h"
 #include "common/hobject.h"
+#include "common/Formatter.h"
 #include "include/rados/librados.h"
 #include "include/rados/librados.hpp"
 #include "include/types.h"
+#include "include/rados/rados_types.hpp"
 #include <include/stringify.h>
 
 #include "librados/AioCompletionImpl.h"
@@ -802,9 +804,10 @@ void librados::NObjectIteratorImpl::set_filter(const bufferlist &bl)
 void librados::NObjectIteratorImpl::get_next()
 {
   const char *entry, *key, *nspace;
+  int fast = 0;
   if (ctx->nlc->at_end())
     return;
-  int ret = rados_nobjects_list_next(ctx.get(), &entry, &key, &nspace);
+  int ret = rados_nobjects_list_next2(ctx.get(), &entry, &key, &nspace, &fast);
   if (ret == -ENOENT) {
     return;
   }
@@ -819,6 +822,7 @@ void librados::NObjectIteratorImpl::get_next()
   cur_obj.impl->nspace = nspace;
   cur_obj.impl->oid = entry;
   cur_obj.impl->locator = key ? key : string();
+  cur_obj.impl->on_fast = fast; 
 }
 
 uint32_t librados::NObjectIteratorImpl::get_pg_hash_position() const
@@ -1286,6 +1290,13 @@ int librados::IoCtx::stat2(const std::string& oid, uint64_t *psize, struct times
 {
   object_t obj(oid);
   return io_ctx_impl->stat2(obj, psize, pts);
+}
+
+int librados::IoCtx::stat3(const std::string& oid, uint64_t *psize,
+                           time_t *pmtime, bool *pon_fast)
+{
+  object_t obj(oid);
+  return io_ctx_impl->stat3(obj, psize, pmtime, pon_fast);
 }
 
 int librados::IoCtx::exec(const std::string& oid, const char *cls, const char *method,
@@ -2005,6 +2016,15 @@ int librados::IoCtx::aio_rmxattr(const std::string& oid, AioCompletion *c,
   return io_ctx_impl->aio_rmxattr(obj, c->pc, name);
 }
 
+int librados::IoCtx::aio_set_alloc_hint(const std::string& oid, AioCompletion *c,
+                                        uint64_t expected_object_size,
+                                        uint64_t expected_write_size,
+                                        uint32_t flags)
+{
+  object_t obj(oid);
+  return io_ctx_impl->aio_set_alloc_hint(obj, c->pc, expected_object_size, expected_write_size, flags);
+}
+
 int librados::IoCtx::aio_stat(const std::string& oid, librados::AioCompletion *c,
 			      uint64_t *psize, time_t *pmtime)
 {
@@ -2525,6 +2545,8 @@ int librados::Rados::get_pool_stats(std::list<string>& v,
     pv.num_kb = SHIFT_ROUND_UP(sum->num_bytes, 10);
     pv.num_bytes = sum->num_bytes;
     pv.num_objects = sum->num_objects;
+    pv.num_bytes_fast = sum->num_bytes_fast;
+    pv.num_objects_fast = sum->num_objects_fast;
     pv.num_object_clones = sum->num_object_clones;
     pv.num_object_copies = sum->num_object_copies;
     pv.num_objects_missing_on_primary = sum->num_objects_missing_on_primary;
@@ -3292,7 +3314,6 @@ CEPH_RADOS_API int rados_inconsistent_pg_list(rados_t cluster, int64_t pool_id,
   tracepoint(librados, rados_inconsistent_pg_list_exit, retval);
   return retval;
 }
-
 
 static void dict_to_map(const char *dict,
                         std::map<std::string, std::string>* dict_map)
@@ -4569,7 +4590,19 @@ extern "C" uint32_t rados_nobjects_list_get_pg_hash_position(
   return retval;
 }
 
-extern "C" int rados_nobjects_list_next(rados_list_ctx_t listctx, const char **entry, const char **key, const char **nspace)
+extern "C" int rados_nobjects_list_next(rados_list_ctx_t listctx,
+                                        const char **entry,
+                                        const char **key,
+                                        const char **nspace)
+{
+  return rados_nobjects_list_next2(listctx, entry, key, nspace, NULL);
+}
+
+extern "C" int rados_nobjects_list_next2(rados_list_ctx_t listctx,
+                                        const char **entry,
+                                        const char **key,
+                                        const char **nspace,
+                                        int* fast)
 {
   tracepoint(librados, rados_nobjects_list_next_enter, listctx);
   librados::ObjListCtx *lh = (librados::ObjListCtx *)listctx;
@@ -4602,6 +4635,8 @@ extern "C" int rados_nobjects_list_next(rados_list_ctx_t listctx, const char **e
   }
   if (nspace)
     *nspace = h->list.front().nspace.c_str();
+  if (fast)
+    *fast = h->list.front().is_on_fast();
   tracepoint(librados, rados_nobjects_list_next_exit, 0, *entry, key, nspace);
   return 0;
 }
@@ -6295,6 +6330,11 @@ const std::string& librados::ListObject::get_oid() const
 const std::string& librados::ListObject::get_locator() const
 {
   return impl->get_locator();
+}
+
+bool librados::ListObject::is_on_fast() const
+{
+  return impl->is_on_fast();
 }
 
 std::ostream& librados::operator<<(std::ostream& out, const librados::ListObject& lop)

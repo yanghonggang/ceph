@@ -362,8 +362,8 @@ int PGBackend::objects_list_partial(
       break;
     }
     for (vector<ghobject_t>::iterator i = objects.begin();
-	 i != objects.end();
-	 ++i) {
+	i != objects.end();
+	++i) {
       if (i->is_pgmeta() || i->hobj.is_temp()) {
 	continue;
       }

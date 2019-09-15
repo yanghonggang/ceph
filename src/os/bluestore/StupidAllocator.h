@@ -48,6 +48,8 @@ public:
   int64_t allocate_int(
     uint64_t want_size, uint64_t alloc_unit, int64_t hint,
     uint64_t *offset, uint32_t *length);
+  void release(
+    const interval_set<uint64_t>& release_set) override;
 
   void release(
     uint64_t offset, uint64_t length) override;

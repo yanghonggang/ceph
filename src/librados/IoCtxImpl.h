@@ -139,6 +139,8 @@ struct librados::IoCtxImpl {
   int remove(const object_t& oid, int flags);
   int stat(const object_t& oid, uint64_t *psize, time_t *pmtime);
   int stat2(const object_t& oid, uint64_t *psize, struct timespec *pts);
+  int stat3(const object_t& oid, uint64_t *psize, time_t *pmtime,
+            bool*on_fast);
   int trunc(const object_t& oid, uint64_t size);
   int cmpext(const object_t& oid, uint64_t off, bufferlist& cmp_bl);
 
@@ -224,6 +226,10 @@ struct librados::IoCtxImpl {
 		    map<string, bufferlist>& attrset);
   int aio_rmxattr(const object_t& oid, AioCompletionImpl *c,
 		  const char *name);
+  int aio_set_alloc_hint(const object_t& oid, AioCompletionImpl *c,
+                         uint64_t expected_object_size,
+                         uint64_t expected_write_size,
+                         uint32_t flags);
   int aio_cancel(AioCompletionImpl *c);
 
   int pool_change_auid(unsigned long long auid);

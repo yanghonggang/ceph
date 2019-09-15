@@ -4075,7 +4075,8 @@ namespace {
     RECOVERY_PRIORITY, RECOVERY_OP_PRIORITY, SCRUB_PRIORITY,
     COMPRESSION_MODE, COMPRESSION_ALGORITHM, COMPRESSION_REQUIRED_RATIO,
     COMPRESSION_MAX_BLOB_SIZE, COMPRESSION_MIN_BLOB_SIZE,
-    CSUM_TYPE, CSUM_MAX_BLOCK, CSUM_MIN_BLOCK };
+    CSUM_TYPE, CSUM_MAX_BLOCK, CSUM_MIN_BLOCK ,
+    CACHE_LOCAL_MODE_DEFAULT_FAST};
 
   std::set<osd_pool_get_choices>
     subtract_second_from_first(const std::set<osd_pool_get_choices>& first,
@@ -4696,6 +4697,7 @@ bool OSDMonitor::preprocess_command(MonOpRequestRef op)
       {"csum_type", CSUM_TYPE},
       {"csum_max_block", CSUM_MAX_BLOCK},
       {"csum_min_block", CSUM_MIN_BLOCK},
+      {"cache_local_mode_default_fast", CACHE_LOCAL_MODE_DEFAULT_FAST},
     };
 
     typedef std::set<osd_pool_get_choices> choices_set_t;
@@ -4707,7 +4709,8 @@ bool OSDMonitor::preprocess_command(MonOpRequestRef op)
       CACHE_MIN_FLUSH_AGE, CACHE_MIN_EVICT_AGE,
       MIN_READ_RECENCY_FOR_PROMOTE,
       MIN_WRITE_RECENCY_FOR_PROMOTE,
-      HIT_SET_GRADE_DECAY_RATE, HIT_SET_SEARCH_LAST_N
+      HIT_SET_GRADE_DECAY_RATE, HIT_SET_SEARCH_LAST_N,
+      CACHE_LOCAL_MODE_DEFAULT_FAST
     };
     const choices_set_t ONLY_ERASURE_CHOICES = {
       ERASURE_CODE_PROFILE
@@ -4720,7 +4723,7 @@ bool OSDMonitor::preprocess_command(MonOpRequestRef op)
 	selected_choices.insert(it->second);
       }
 
-      if(!p->is_tier()) {
+      if((p->cache_mode != pg_pool_t::CACHEMODE_LOCAL) && !p->is_tier()) {
 	selected_choices = subtract_second_from_first(selected_choices,
 						      ONLY_TIER_CHOICES);
       }
@@ -4733,13 +4736,13 @@ bool OSDMonitor::preprocess_command(MonOpRequestRef op)
       choices_map_t::const_iterator found = ALL_CHOICES.find(var);
       osd_pool_get_choices selected = found->second;
 
-      if (!p->is_tier() &&
-	  ONLY_TIER_CHOICES.find(selected) != ONLY_TIER_CHOICES.end()) {
-	ss << "pool '" << poolstr
-	   << "' is not a tier pool: variable not applicable";
-	r = -EACCES;
-	goto reply;
-      }
+      // if (!p->is_tier() &&
+      //     ONLY_TIER_CHOICES.find(selected) != ONLY_TIER_CHOICES.end()) {
+      //   ss << "pool '" << poolstr
+      //      << "' is not a tier pool: variable not applicable";
+      //   r = -EACCES;
+      //   goto reply;
+      // }
 
       if (!p->is_erasure() &&
 	  ONLY_ERASURE_CHOICES.find(selected)
@@ -4851,6 +4854,10 @@ bool OSDMonitor::preprocess_command(MonOpRequestRef op)
 	    f->dump_float("cache_target_dirty_ratio",
 			  ((float)p->cache_target_dirty_ratio_micro/1000000));
 	    break;
+          case CACHE_LOCAL_MODE_DEFAULT_FAST:
+            f->dump_bool("cache_local_mode_default_fast",
+                         p->cache_local_mode_default_fast);
+            break;
 	  case CACHE_TARGET_DIRTY_HIGH_RATIO:
 	    f->dump_unsigned("cache_target_dirty_high_ratio_micro",
 			     p->cache_target_dirty_high_ratio_micro);
@@ -4979,6 +4986,9 @@ bool OSDMonitor::preprocess_command(MonOpRequestRef op)
 	  case USE_GMT_HITSET:
 	    ss << "use_gmt_hitset: " << p->use_gmt_hitset << "\n";
 	    break;
+          case CACHE_LOCAL_MODE_DEFAULT_FAST:
+            ss << "cache_local_mode_default_fast: " << p->cache_local_mode_default_fast << "\n";
+            break;
 	  case TARGET_MAX_OBJECTS:
 	    ss << "target_max_objects: " << p->target_max_objects << "\n";
 	    break;
@@ -6221,6 +6231,8 @@ int OSDMonitor::prepare_new_pool(string& name, uint64_t auid,
   pi->cache_min_flush_age = g_conf->osd_pool_default_cache_min_flush_age;
   pi->cache_min_evict_age = g_conf->osd_pool_default_cache_min_evict_age;
   pending_inc.new_pool_names[pool] = name;
+  pi->cache_local_mode_default_fast = 
+    g_conf->osd_pool_default_cache_local_mode_fast;
   return 0;
 }
 
@@ -6288,8 +6300,7 @@ int OSDMonitor::prepare_command_pool_set(map<string,cmd_vartype> &cmdmap,
     f = strict_strtod(val.c_str(), &floaterr);
     uf = llrintl(f * (double)1000000.0);
   }
-
-  if (!p.is_tier() &&
+  if ((!p.is_tier() && !p.in_local_mode()) &&
       (var == "hit_set_type" || var == "hit_set_period" ||
        var == "hit_set_count" || var == "hit_set_fpp" ||
        var == "target_max_objects" || var == "target_max_bytes" ||
@@ -6297,7 +6308,9 @@ int OSDMonitor::prepare_command_pool_set(map<string,cmd_vartype> &cmdmap,
        var == "cache_target_dirty_high_ratio" || var == "use_gmt_hitset" ||
        var == "cache_min_flush_age" || var == "cache_min_evict_age" ||
        var == "hit_set_grade_decay_rate" || var == "hit_set_search_last_n" ||
-       var == "min_read_recency_for_promote" || var == "min_write_recency_for_promote")) {
+       var == "min_read_recency_for_promote" ||
+       var == "min_write_recency_for_promote" ||
+       var == "cache_local_mode_default_fast")) {
     return -EACCES;
   }
 
@@ -6615,6 +6628,8 @@ int OSDMonitor::prepare_command_pool_set(map<string,cmd_vartype> &cmdmap,
       return -EINVAL;
     }
     p.cache_min_evict_age = n;
+  } else if (var == "cache_local_mode_default_fast") {
+    p.cache_local_mode_default_fast = n;
   } else if (var == "min_read_recency_for_promote") {
     if (interr.length()) {
       ss << "error parsing integer value '" << val << "': " << interr;
@@ -11071,18 +11086,34 @@ bool OSDMonitor::prepare_command_impl(MonOpRequestRef op,
       err = -ENOENT;
       goto reply;
     }
-    const pg_pool_t *p = osdmap.get_pg_pool(pool_id);
-    assert(p);
-    if (!p->is_tier()) {
-      ss << "pool '" << poolstr << "' is not a tier";
-      err = -EINVAL;
-      goto reply;
-    }
+
     string modestr;
     cmd_getval(g_ceph_context, cmdmap, "mode", modestr);
     pg_pool_t::cache_mode_t mode = pg_pool_t::get_cache_mode_from_str(modestr);
     if (mode < 0) {
       ss << "'" << modestr << "' is not a valid cache mode";
+      err = -EINVAL;
+      goto reply;
+    }
+
+    const pg_pool_t *p = osdmap.get_pg_pool(pool_id);
+    assert(p);
+    {
+      auto statfs = mon->pgservice->get_statfs(osdmap, pool_id);
+      if ((mode == pg_pool_t::CACHEMODE_LOCAL) && !statfs.kb_fast) {
+        ss << "no tier device available";
+        err = -EINVAL;
+        goto reply;
+      }
+    }
+    bool skip_tier_check = false;
+    if (mode == pg_pool_t::CACHEMODE_LOCAL ||
+       (p->cache_mode == pg_pool_t::CACHEMODE_LOCAL &&
+        mode == pg_pool_t::CACHEMODE_NONE))
+      skip_tier_check = true;
+
+    if (!skip_tier_check && !p->is_tier()) {
+      ss << "pool '" << poolstr << "' is not a tier";
       err = -EINVAL;
       goto reply;
     }
@@ -11197,13 +11228,18 @@ bool OSDMonitor::prepare_command_impl(MonOpRequestRef op,
     np->flags |= pg_pool_t::FLAG_INCOMPLETE_CLONES;
     ss << "set cache-mode for pool '" << poolstr
 	<< "' to " << pg_pool_t::get_cache_mode_name(mode);
-    if (mode == pg_pool_t::CACHEMODE_NONE) {
+    if (mode == pg_pool_t::CACHEMODE_NONE && !skip_tier_check) {
       const pg_pool_t *base_pool = osdmap.get_pg_pool(np->tier_of);
       assert(base_pool);
       if (base_pool->read_tier == pool_id ||
 	  base_pool->write_tier == pool_id)
 	ss <<" (WARNING: pool is still configured as read or write tier)";
     }
+    // when change tier mode from local to none, hitset will also be cleared
+    if (mode == pg_pool_t::CACHEMODE_NONE &&
+        p->cache_mode == pg_pool_t::CACHEMODE_LOCAL)
+      np->clear_tier();
+
     wait_for_finished_proposal(op, new Monitor::C_Command(mon, op, 0, ss.str(),
 					      get_last_committed() + 1));
     return true;

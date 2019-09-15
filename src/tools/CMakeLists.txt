@@ -81,6 +81,11 @@ add_executable(osdmaptool ${osdomaptool_srcs})
 target_link_libraries(osdmaptool global)
 install(TARGETS osdmaptool DESTINATION bin)
 
+set(calc_crc_srcs calc_crc.cc)
+add_executable(calc_crc ${calc_crc_srcs})
+target_link_libraries(calc_crc global)
+install(TARGETS calc_crc DESTINATION bin)
+
 if(WITH_TESTS)
 set(ceph_psim_srcs psim.cc)
 add_executable(ceph_psim ${ceph_psim_srcs})

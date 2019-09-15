@@ -57,6 +57,9 @@ using namespace std;
 
 //#define DEBUG_RECOVERY_OIDS   // track set of recovering oids explicitly, to find counting bugs
 
+// define this macro to debug fast object counter
+// #define PG_DEBUG_FAST
+
 class OSD;
 class OSDService;
 class MOSDOp;
@@ -309,6 +312,10 @@ protected:
   uint64_t _ref_id;
 #endif
 
+#ifdef PG_DEBUG_FAST
+  /* used to trace fast object num counter */
+  map<hobject_t, string> _fast_nums;
+#endif
 public:
   bool deleting;  // true while in removing or OSD is shutting down
 
@@ -331,6 +338,11 @@ public:
   uint64_t get_with_id();
   void put_with_id(uint64_t);
   void dump_live_ids();
+#endif
+#ifdef PG_DEBUG_FAST
+  void fast_add(const hobject_t& o, const char* func, int line);
+  void fast_remove(const hobject_t& o);
+  void fast_dump();
 #endif
   void get(const char* tag);
   void put(const char* tag);

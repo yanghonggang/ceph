@@ -100,6 +100,12 @@ const char * ceph_osd_op_flag_name(unsigned flag)
     case CEPH_OSD_OP_FLAG_FADVISE_NOCACHE:
       name = "fadvise_nocache";
       break;
+    case CEPH_OSD_OP_FLAG_WITH_REFERENCE:
+      name = "with_reference";
+      break;
+    case CEPH_OSD_OP_FLAG_BYPASS_CLEAN_CACHE:
+      name = "bypass_clean_cache";
+      break;
     default:
       name = "???";
   };
@@ -313,6 +319,9 @@ void osd_stat_t::dump(Formatter *f) const
   f->dump_unsigned("kb", kb);
   f->dump_unsigned("kb_used", kb_used);
   f->dump_unsigned("kb_avail", kb_avail);
+  f->dump_unsigned("kb_fast", kb_fast);
+  f->dump_unsigned("kb_used_fast", kb_used_fast);
+  f->dump_unsigned("kb_avail_fast", kb_avail_fast);
   f->open_array_section("hb_peers");
   for (auto p : hb_peers)
     f->dump_int("osd", p);
@@ -329,7 +338,7 @@ void osd_stat_t::dump(Formatter *f) const
 
 void osd_stat_t::encode(bufferlist &bl) const
 {
-  ENCODE_START(7, 2, bl);
+  ENCODE_START(8, 2, bl);
   ::encode(kb, bl);
   ::encode(kb_used, bl);
   ::encode(kb_avail, bl);
@@ -342,6 +351,10 @@ void osd_stat_t::encode(bufferlist &bl) const
   ::encode(up_from, bl);
   ::encode(seq, bl);
   ::encode(num_pgs, bl);
+
+  ::encode(kb_fast, bl);
+  ::encode(kb_used_fast, bl);
+  ::encode(kb_avail_fast, bl);
   ENCODE_FINISH(bl);
 }
 
@@ -367,6 +380,11 @@ void osd_stat_t::decode(bufferlist::iterator &bl)
   if (struct_v >= 7) {
     ::decode(num_pgs, bl);
   }
+  if (struct_v >= 8) {
+    ::decode(kb_fast, bl);
+    ::decode(kb_used_fast, bl);
+    ::decode(kb_avail_fast, bl);
+  }
   DECODE_FINISH(bl);
 }
 
@@ -378,6 +396,9 @@ void osd_stat_t::generate_test_instances(std::list<osd_stat_t*>& o)
   o.back()->kb = 1;
   o.back()->kb_used = 2;
   o.back()->kb_avail = 3;
+  o.back()->kb_fast = 0;
+  o.back()->kb_used_fast = 0;
+  o.back()->kb_avail_fast = 1;
   o.back()->hb_peers.push_back(7);
   o.back()->snap_trim_queue_len = 8;
   o.back()->num_snap_trimming = 99;
@@ -1207,6 +1228,7 @@ void pg_pool_t::dump(Formatter *f) const
 		   cache_target_dirty_high_ratio_micro);
   f->dump_unsigned("cache_target_full_ratio_micro",
 		   cache_target_full_ratio_micro);
+  f->dump_bool("cache_local_mode_default_fast", cache_local_mode_default_fast);
   f->dump_unsigned("cache_min_flush_age", cache_min_flush_age);
   f->dump_unsigned("cache_min_evict_age", cache_min_evict_age);
   f->dump_string("erasure_code_profile", erasure_code_profile);
@@ -1538,7 +1560,7 @@ void pg_pool_t::encode(bufferlist& bl, uint64_t features) const
     return;
   }
 
-  uint8_t v = 26;
+  uint8_t v = 27;
   if (!(features & CEPH_FEATURE_NEW_OSDOP_ENCODING)) {
     // this was the first post-hammer thing we added; if it's missing, encode
     // like hammer.
@@ -1613,6 +1635,9 @@ void pg_pool_t::encode(bufferlist& bl, uint64_t features) const
   }
   if (v >= 26) {
     ::encode(application_metadata, bl);
+  }
+  if (v >= 27) {
+    ::encode(cache_local_mode_default_fast, bl);
   }
   ENCODE_FINISH(bl);
 }
@@ -1768,6 +1793,9 @@ void pg_pool_t::decode(bufferlist::iterator& bl)
   }
   if (struct_v >= 26) {
     ::decode(application_metadata, bl);
+  }
+  if (struct_v >= 27) {
+    ::decode(cache_local_mode_default_fast, bl);
   }
   DECODE_FINISH(bl);
   calc_pg_masks();
@@ -1937,17 +1965,20 @@ void object_stat_sum_t::dump(Formatter *f) const
   f->dump_int("num_evict", num_evict);
   f->dump_int("num_evict_kb", num_evict_kb);
   f->dump_int("num_promote", num_promote);
+  f->dump_int("num_promote_kb", num_promote_kb);
   f->dump_int("num_flush_mode_high", num_flush_mode_high);
   f->dump_int("num_flush_mode_low", num_flush_mode_low);
   f->dump_int("num_evict_mode_some", num_evict_mode_some);
   f->dump_int("num_evict_mode_full", num_evict_mode_full);
   f->dump_int("num_objects_pinned", num_objects_pinned);
   f->dump_int("num_legacy_snapsets", num_legacy_snapsets);
+  f->dump_int("num_bytes_fast", num_bytes_fast);
+  f->dump_int("num_objects_fast", num_objects_fast);
 }
 
 void object_stat_sum_t::encode(bufferlist& bl) const
 {
-  ENCODE_START(16, 14, bl);
+  ENCODE_START(17, 14, bl);
 #if defined(CEPH_LITTLE_ENDIAN)
   bl.append((char *)(&num_bytes), sizeof(object_stat_sum_t));
 #else
@@ -1986,6 +2017,9 @@ void object_stat_sum_t::encode(bufferlist& bl) const
   ::encode(num_objects_pinned, bl);
   ::encode(num_objects_missing, bl);
   ::encode(num_legacy_snapsets, bl);
+  ::encode(num_bytes_fast, bl);
+  ::encode(num_objects_fast, bl);
+  ::encode(num_promote_kb, bl);
 #endif
   ENCODE_FINISH(bl);
 }
@@ -1993,9 +2027,10 @@ void object_stat_sum_t::encode(bufferlist& bl) const
 void object_stat_sum_t::decode(bufferlist::iterator& bl)
 {
   bool decode_finish = false;
-  DECODE_START(16, bl);
+  DECODE_START(17, bl);
 #if defined(CEPH_LITTLE_ENDIAN)
-  if (struct_v >= 16) {
+  if (struct_v >= 17) {
+    // NOTE: this must match newest decode version
     bl.copy(sizeof(object_stat_sum_t), (char*)(&num_bytes));
     decode_finish = true;
   }
@@ -2039,6 +2074,11 @@ void object_stat_sum_t::decode(bufferlist::iterator& bl)
       ::decode(num_legacy_snapsets, bl);
     } else {
       num_legacy_snapsets = num_object_clones;  // upper bound
+    }
+    if (struct_v >= 17) {
+      ::decode(num_bytes_fast, bl);
+      ::decode(num_objects_fast, bl);
+      ::decode(num_promote_kb, bl);
     }
   }
   DECODE_FINISH(bl);
@@ -2119,6 +2159,9 @@ void object_stat_sum_t::add(const object_stat_sum_t& o)
   num_evict_mode_full += o.num_evict_mode_full;
   num_objects_pinned += o.num_objects_pinned;
   num_legacy_snapsets += o.num_legacy_snapsets;
+  num_bytes_fast += o.num_bytes_fast;
+  num_objects_fast += o.num_objects_fast;
+  num_promote_kb += o.num_promote_kb;
 }
 
 void object_stat_sum_t::sub(const object_stat_sum_t& o)
@@ -2158,6 +2201,9 @@ void object_stat_sum_t::sub(const object_stat_sum_t& o)
   num_evict_mode_full -= o.num_evict_mode_full;
   num_objects_pinned -= o.num_objects_pinned;
   num_legacy_snapsets -= o.num_legacy_snapsets;
+  num_bytes_fast -= o.num_bytes_fast;
+  num_objects_fast -= o.num_objects_fast;
+  num_promote_kb -= o.num_promote_kb;
 }
 
 bool operator==(const object_stat_sum_t& l, const object_stat_sum_t& r)
@@ -2197,7 +2243,10 @@ bool operator==(const object_stat_sum_t& l, const object_stat_sum_t& r)
     l.num_evict_mode_some == r.num_evict_mode_some &&
     l.num_evict_mode_full == r.num_evict_mode_full &&
     l.num_objects_pinned == r.num_objects_pinned &&
-    l.num_legacy_snapsets == r.num_legacy_snapsets;
+    l.num_legacy_snapsets == r.num_legacy_snapsets &&
+    l.num_bytes_fast == r.num_bytes_fast &&
+    l.num_objects_fast == r.num_objects_fast &&
+    l.num_promote_kb == r.num_promote_kb;
 }
 
 // -- object_stat_collection_t --
@@ -2378,7 +2427,7 @@ void pg_stat_t::encode(bufferlist &bl) const
 void pg_stat_t::decode(bufferlist::iterator &bl)
 {
   bool tmp;
-  DECODE_START(22, bl);
+  DECODE_START(23, bl);
   ::decode(version, bl);
   ::decode(reported_seq, bl);
   ::decode(reported_epoch, bl);
@@ -5959,7 +6008,8 @@ ostream& operator<<(ostream& out, const OSDOp& op)
       break;
     case CEPH_OSD_OP_SETALLOCHINT:
       out << " object_size " << op.op.alloc_hint.expected_object_size
-          << " write_size " << op.op.alloc_hint.expected_write_size;
+          << " write_size " << op.op.alloc_hint.expected_write_size
+          << " flags " << op.op.alloc_hint.flags;
       break;
     case CEPH_OSD_OP_READ:
     case CEPH_OSD_OP_SPARSE_READ:

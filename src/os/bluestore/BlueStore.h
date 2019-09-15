@@ -50,7 +50,6 @@ class BlueFS;
 //#define DEBUG_DEFERRED
 
 
-
 // constants for Buffer::optimize()
 #define MAX_BUFFER_SLOP_RATIO_DEN  8  // so actually 1/N
 
@@ -117,6 +116,8 @@ enum {
   l_bluestore_extent_compress,
   l_bluestore_gc_merged,
   l_bluestore_read_eio,
+  l_bluestore_fast_2_slow_lat,
+  l_bluestore_slow_2_fast_lat,
   l_bluestore_last
 };
 
@@ -129,6 +130,12 @@ public:
   const char** get_tracked_conf_keys() const override;
   void handle_conf_change(const struct md_config_t *conf,
                                   const std::set<std::string> &changed) override;
+
+  //handler for discard event
+  void handle_discard(interval_set<uint64_t>& to_release);
+
+  //handler for discard event
+  void handle_discard_fast(interval_set<uint64_t>& to_release);
 
   void _set_csum();
   void _set_compression();
@@ -239,6 +246,10 @@ public:
 
   /// map logical extent range (object) onto buffers
   struct BufferSpace {
+    enum {
+      BYPASS_CLEAN_CACHE = 0x1,  // bypass clean cache
+    };
+
     typedef boost::intrusive::list<
       Buffer,
       boost::intrusive::member_hook<
@@ -338,7 +349,8 @@ public:
 
     void read(Cache* cache, uint32_t offset, uint32_t length,
 	      BlueStore::ready_regions_t& res,
-	      interval_set<uint32_t>& res_intervals);
+	      interval_set<uint32_t>& res_intervals,
+	      int flags = 0);
 
     void truncate(Cache* cache, uint32_t offset) {
       discard(cache, offset, (uint32_t)-1 - offset);
@@ -1523,6 +1535,8 @@ public:
       case l_bluestore_state_deferred_cleanup_lat: return "deferred_cleanup";
       case l_bluestore_state_finishing_lat: return "finishing";
       case l_bluestore_state_done_lat: return "done";
+      case l_bluestore_fast_2_slow_lat: return "fast_2_slow";
+      case l_bluestore_slow_2_fast_lat: return "slow_2_fast";
       }
       return "???";
     }
@@ -1562,7 +1576,11 @@ public:
     bluestore_deferred_transaction_t *deferred_txn = nullptr; ///< if any
 
     interval_set<uint64_t> allocated, released;
+    interval_set<uint64_t> allocated_fast, released_fast;
     volatile_statfs statfs_delta;
+
+    uint64_t preallocated = 0;
+    int rval = 0;
 
     IOContext ioc;
     bool had_ios = false;  ///< true if we submitted IOs before our kv txn
@@ -1621,10 +1639,13 @@ public:
     struct deferred_io {
       bufferlist bl;    ///< data
       uint64_t seq;     ///< deferred transaction seq
+      bool fast;	///< on fast dev
     };
     map<uint64_t,deferred_io> iomap; ///< map of ios in this batch
     deferred_queue_t txcs;           ///< txcs in this batch
-    IOContext ioc;                   ///< our aios
+    IOContext ioc;                   ///< our aios for slow dev
+    IOContext ioc_fast;                   ///< our aios for fast dev
+    std::atomic_int num_iocs = {0}; ///< num iocs to wait
     /// bytes of pending io for each deferred seq (may be 0)
     map<uint64_t,int> seq_bytes;
 
@@ -1632,12 +1653,12 @@ public:
     void _audit(CephContext *cct);
 
     DeferredBatch(CephContext *cct, OpSequencer *osr)
-      : osr(osr), ioc(cct, this) {}
+      : osr(osr), ioc(cct, this), ioc_fast(cct, this) {}
 
     /// prepare a write
     void prepare_write(CephContext *cct,
 		       uint64_t seq, uint64_t offset, uint64_t length,
-		       bufferlist::const_iterator& p);
+		       bufferlist::const_iterator& p, bool fast = false);
 
     void aio_finish(BlueStore *store) override {
       store->_deferred_aio_finish(osr);
@@ -1825,9 +1846,12 @@ private:
 
   KeyValueDB *db = nullptr;
   BlockDevice *bdev = nullptr;
+  BlockDevice *bdev_fast = nullptr;
   std::string freelist_type;
   FreelistManager *fm = nullptr;
+  FreelistManager *fm_fast = nullptr;
   Allocator *alloc = nullptr;
+  Allocator *alloc_fast = nullptr;
   uuid_d fsid;
   int path_fd = -1;  ///< open handle to $path
   int fsid_fd = -1;  ///< open handle (locked) to $path/fsid
@@ -1983,6 +2007,12 @@ private:
   void _close_fm();
   int _open_alloc();
   void _close_alloc();
+  int _open_bdev_fast(bool create);
+  void _close_bdev_fast();
+  int _open_fm_fast(bool create);
+  void _close_fm_fast();
+  int _open_alloc_fast();
+  void _close_alloc_fast();
   int _open_collections(int *errors=0);
   void _close_collections();
 
@@ -2014,8 +2044,8 @@ private:
   void _assign_nid(TransContext *txc, OnodeRef o);
   uint64_t _assign_blobid(TransContext *txc);
 
-  void _dump_onode(const OnodeRef& o, int log_level=30);
-  void _dump_extent_map(ExtentMap& em, int log_level=30);
+  void _dump_onode(const OnodeRef& o, int log_level=30) const;
+  void _dump_extent_map(ExtentMap& em, int log_level=30) const;
   void _dump_transaction(Transaction *t, int log_level = 30);
 
   TransContext *_txc_create(OpSequencer *osr);
@@ -2067,7 +2097,8 @@ private:
     bool compressed,
     mempool_dynamic_bitset &used_blocks,
     uint64_t granularity,
-    store_statfs_t& expected_statfs);
+    store_statfs_t& expected_statfs,
+    bool on_fast = false);
 
   void _buffer_cache_write(
     TransContext *txc,
@@ -2082,7 +2113,8 @@ private:
 
   int _collection_list(
     Collection *c, const ghobject_t& start, const ghobject_t& end,
-    int max, vector<ghobject_t> *ls, ghobject_t *next);
+    int max, vector<ghobject_t> *ls, ghobject_t *next,
+    bool skip_fast = false); // skip get fast info step
 
   template <typename T, typename F>
   T select_option(const std::string& opt_name, T val1, F f) {
@@ -2205,7 +2237,8 @@ public:
   }
 
 public:
-  int statfs(struct store_statfs_t *buf) override;
+  int statfs(struct store_statfs_t *buf,
+             struct store_statfs_t *fast_buf=NULL) override;
 
   void collect_metadata(map<string,string> *pm) override;
 
@@ -2244,7 +2277,8 @@ public:
     uint64_t offset,
     size_t len,
     bufferlist& bl,
-    uint32_t op_flags = 0);
+    uint32_t op_flags = 0,
+    uint8_t retry_count = 0);
 
 private:
   int _fiemap(CollectionHandle &c_, const ghobject_t& oid,
@@ -2460,6 +2494,7 @@ private:
   struct WriteContext {
     bool buffered = false;          ///< buffered write
     bool compress = false;          ///< compressed write
+    uint64_t preallocated = 0;
     uint64_t target_blob_size = 0;  ///< target (max) blob size
     unsigned csum_order = 0;        ///< target checksum chunk order
 
@@ -2616,7 +2651,7 @@ private:
 	    CollectionRef& c,
 	    OnodeRef& o,
 	    uint64_t offset, size_t len);
-  void _do_truncate(TransContext *txc,
+  int _do_truncate(TransContext *txc,
 		   CollectionRef& c,
 		   OnodeRef o,
 		   uint64_t offset,
@@ -2701,6 +2736,11 @@ private:
 			CollectionRef& c,
 			CollectionRef& d,
 			unsigned bits, int rem);
+  int _move_data_between_tiers(
+    TransContext *txc,
+    CollectionRef& c,
+    OnodeRef& o,
+    uint32_t flags);
 };
 
 inline ostream& operator<<(ostream& out, const BlueStore::OpSequencer& s) {

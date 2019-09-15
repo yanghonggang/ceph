@@ -74,7 +74,7 @@ void usage(ostream& out)
 "   purge <pool-name> --yes-i-really-really-mean-it\n"
 "                                    remove all objects from pool <pool-name> without removing it\n"
 "   df                               show per-pool and total usage\n"
-"   ls                               list objects in pool\n\n"
+"   ls [--more]                      list objects in pool\n\n"
 "   chown 123                        change the pool owner to auid 123\n"
 "\n"
 "POOL SNAP COMMANDS\n"
@@ -83,6 +83,8 @@ void usage(ostream& out)
 "   rmsnap <snap-name>               remove snap <snap-name>\n"
 "\n"
 "OBJECT COMMANDS\n"
+"   pin <obj-name>                   pin object in cache\n"
+"   unpin <obj-name>                 unpin object in cache\n"
 "   get <obj-name> [outfile]         fetch object\n"
 "   put <obj-name> [infile] [--offset offset]\n"
 "                                    write object with start offset (default:0)\n"
@@ -120,7 +122,7 @@ void usage(ostream& out)
 "   watch <obj-name>                 add watcher on this object\n"
 "   notify <obj-name> <message>      notify watcher of this object with message\n"
 "   listwatchers <obj-name>          list the watchers of this object\n"
-"   set-alloc-hint <obj-name> <expected-object-size> <expected-write-size>\n"
+"   set-alloc-hint <obj-name> <expected-object-size> <expected-write-size> [--fast]\n"
 "                                    set allocation hint for an object\n"
 "\n"
 "IMPORT AND EXPORT\n"
@@ -157,6 +159,7 @@ void usage(ostream& out)
 "   cache-evict <obj-name>           evict cache pool object\n"
 "   cache-flush-evict-all            flush+evict all objects\n"
 "   cache-try-flush-evict-all        try-flush+evict all objects\n"
+"   cache-demote-all                 demote all objects from tier to base dev\n"
 "\n"
 "GLOBAL OPTIONS:\n"
 "   --object_locator object_locator\n"
@@ -273,6 +276,19 @@ static int dump_data(std::string const &filename, bufferlist const &data)
   return r;
 }
 
+static int do_pin(IoCtx& io_ctx, const char* objname)
+{
+  ObjectWriteOperation op;
+  op.cache_pin();
+  return io_ctx.operate(objname, &op);
+}
+
+static int do_unpin(IoCtx& io_ctx, const char* objname)
+{
+  ObjectWriteOperation op;
+  op.cache_unpin();
+  return io_ctx.operate(objname, &op);
+}
 
 static int do_get(IoCtx& io_ctx, RadosStriper& striper,
 		  const char *objname, const char *outfile, unsigned op_size,
@@ -376,7 +392,7 @@ static int do_copy_pool(Rados& rados, const char *src_pool, const char *target_p
 
 static int do_put(IoCtx& io_ctx, RadosStriper& striper,
 		  const char *objname, const char *infile, int op_size,
-		  uint64_t obj_offset, bool use_striper)
+		  uint64_t obj_offset, bool use_striper, bool hint_fast)
 {
   string oid(objname);
   bool stdio = (strcmp(infile, "-") == 0);
@@ -429,10 +445,20 @@ static int do_put(IoCtx& io_ctx, RadosStriper& striper,
       else
 	ret = striper.write(oid, indata, count, offset);
     } else {
+      uint32_t flags = 0;
+      if (hint_fast)
+        flags = ALLOC_HINT_FLAG_FAST_TIER;
+      if (hint_fast) {
+        ret = io_ctx.set_alloc_hint2(oid, indata.length(), indata.length(),
+                                     flags);
+        if (ret < 0)
+          goto out;
+      }
+
       if (offset == 0)
-	ret = io_ctx.write_full(oid, indata);
+        ret = io_ctx.write_full(oid, indata);
       else
-	ret = io_ctx.write(oid, indata, count, offset);
+        ret = io_ctx.write(oid, indata, count, offset);
     }
 
     if (ret < 0) {
@@ -916,12 +942,16 @@ protected:
     librados::ObjectWriteOperation op;
 
     if (write_destination & OP_WRITE_DEST_OBJ) {
-      if (data.hints)
-	op.set_alloc_hint2(data.object_size, data.op_size,
-			   ALLOC_HINT_FLAG_SEQUENTIAL_WRITE |
-			   ALLOC_HINT_FLAG_SEQUENTIAL_READ |
-			   ALLOC_HINT_FLAG_APPEND_ONLY |
-			   ALLOC_HINT_FLAG_IMMUTABLE);
+      if (data.hints) {
+        uint32_t flags = ALLOC_HINT_FLAG_SEQUENTIAL_WRITE |
+                         ALLOC_HINT_FLAG_SEQUENTIAL_READ |
+                         ALLOC_HINT_FLAG_APPEND_ONLY |
+                         ALLOC_HINT_FLAG_IMMUTABLE;
+        if (data.hint_fast)
+          flags |= ALLOC_HINT_FLAG_FAST_TIER;
+
+	op.set_alloc_hint2(data.object_size, data.op_size, flags);
+      }
       op.write(offset, bl);
     }
 
@@ -1194,6 +1224,12 @@ static int do_cache_try_flush(IoCtx& io_ctx, string oid)
   return r;
 }
 
+static int do_migrate(IoCtx& io_ctx, string oid, bool promote)
+{
+  return io_ctx.set_alloc_hint2(oid, 0, 0, (promote ?
+                                ALLOC_HINT_FLAG_FAST_TIER : 0));
+}
+
 static int do_cache_evict(IoCtx& io_ctx, string oid)
 {
   ObjectReadOperation op;
@@ -1209,6 +1245,69 @@ static int do_cache_evict(IoCtx& io_ctx, string oid)
   int r = completion->get_return_value();
   completion->release();
   return r;
+}
+
+static int do_cache_demote_all(IoCtx& io_ctx)
+{
+  int errors = 0;
+  io_ctx.set_namespace(all_nspaces);
+  try {
+    librados::NObjectIterator i = io_ctx.nobjects_begin();
+    librados::NObjectIterator i_end = io_ctx.nobjects_end();
+    for (; i != i_end; i++) {
+      int r;
+      cout << i->get_nspace()
+           << "\t" << i->get_oid()
+           << "\t" << i->get_locator()
+           << "\t" << (i->is_on_fast() ? "fast" : "slow")
+           << std::endl;
+      if (i->get_locator().size()) {
+        io_ctx.locator_set_key(i->get_locator());
+      } else {
+        io_ctx.locator_set_key(string());
+      }
+      io_ctx.set_namespace(i->get_nspace());
+      snap_set_t ls;
+      io_ctx.snap_set_read(LIBRADOS_SNAP_DIR);
+      r = io_ctx.list_snaps(i->get_oid(), &ls);
+      if (r < 0) {
+        cerr << "error listing snap shots " << i->get_nspace() << "/" << i->get_oid() << ": "
+             << cpp_strerror(r) << std::endl;
+        errors ++;
+        continue;
+      }
+      std::vector<clone_info_t>::iterator ci = ls.clones.begin();
+      // no snapshots
+      if (ci == ls.clones.end()) {
+        if (i->is_on_fast()) {
+          r = do_migrate(io_ctx, i->get_oid(), false);
+          if (r < 0) {
+            cerr << "failed to demote " << i->get_nspace() << "/" << i->get_oid() << ": "
+                 << cpp_strerror(r) << std::endl;
+            errors ++;
+            continue;
+          }
+        }
+      } else {
+        // FIXME: don't know whether a clone/snap objects is on fast device or not
+        for (std::vector<clone_info_t>::iterator ci = ls.clones.begin();
+             ci != ls.clones.end(); ci++) {
+          io_ctx.snap_set_read(ci->cloneid);
+          r = do_migrate(io_ctx, i->get_oid(), false);
+          if (r < 0) {
+            cerr << "failed to demote " << i->get_nspace() << "/" << i->get_oid() << ": "
+                 << cpp_strerror(r) << std::endl;
+            errors ++;
+            break;
+          }
+        }
+      }
+    }
+  } catch (const std::runtime_error& e) {
+    cerr << e.what() << std::endl;
+    return -1;
+  }
+  return errors ? -1 : 0;
 }
 
 static int do_cache_flush_evict_all(IoCtx& io_ctx, bool blocking)
@@ -1693,6 +1792,8 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
   int bench_write_dest = 0;
   bool cleanup = true;
   bool hints = true; // for rados bench
+  bool hint_fast = false; // hint object should be stored in fast dev
+  bool more = false; // show data location info
   bool no_verify = false;
   bool use_striper = false;
   bool with_clones = false;
@@ -1878,6 +1979,14 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
   i = opts.find("no-hints");
   if (i != opts.end()) {
     hints = false;
+  }
+  i = opts.find("fast");
+  if (i != opts.end()) {
+    hint_fast = true;
+  }
+  i = opts.find("more");
+  if (i != opts.end()) {
+    more = true;
   }
   i = opts.find("pretty-format");
   if (i != opts.end()) {
@@ -2115,6 +2224,8 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
       tab.define_column("RD", TextTable::LEFT, TextTable::RIGHT);
       tab.define_column("WR_OPS", TextTable::LEFT, TextTable::RIGHT);
       tab.define_column("WR", TextTable::LEFT, TextTable::RIGHT);
+      tab.define_column("TUSED", TextTable::LEFT, TextTable::RIGHT);
+      tab.define_column("TOBJECTS", TextTable::LEFT, TextTable::RIGHT);
     } else {
       formatter->open_object_section("stats");
       formatter->open_array_section("pools");
@@ -2137,6 +2248,8 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
             << si_t(s.num_rd_kb << 10)
             << s.num_wr
             << si_t(s.num_wr_kb << 10)
+            << si_t(s.num_bytes_fast)
+            << s.num_objects_fast
             << TextTable::endrow;
       } else {
         formatter->open_object_section("pool");
@@ -2148,8 +2261,10 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
           cerr << "ERROR: lookup_pg_pool_name for name=" << pool_name
 	       << " returned " << pool_id << std::endl;
 	formatter->dump_int("size_bytes",s.num_bytes);
+	formatter->dump_int("size_bytes_tier",s.num_bytes_fast);
 	formatter->dump_int("size_kb", s.num_kb);
 	formatter->dump_int("num_objects", s.num_objects);
+	formatter->dump_int("num_objects_tier", s.num_objects_fast);
 	formatter->dump_int("num_object_clones", s.num_object_clones);
 	formatter->dump_int("num_object_copies", s.num_object_copies);
 	formatter->dump_int("num_objects_missing_on_primary", s.num_objects_missing_on_primary);
@@ -2237,6 +2352,8 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
 	    }
 	    if (i->get_locator().size())
 	      *outstream << "\t" << i->get_locator();
+            if (more)
+	      *outstream << "\t" << (i->is_on_fast() ? "fast" : "slow");
 	    *outstream << std::endl;
 	  } else {
 	    formatter->open_object_section("object");
@@ -2248,6 +2365,8 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
 	    }
 	    if (i->get_locator().size())
 	      formatter->dump_string("locator", i->get_locator());
+            if (more)
+              formatter->dump_bool("fast", i->is_on_fast());
 	    formatter->close_section(); //object
 	  }
 	}
@@ -2307,10 +2426,11 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
     string oid(nargs[1]);
     uint64_t size;
     time_t mtime;
+    bool on_fast = false;
     if (use_striper) {
       ret = striper.stat(oid, &size, &mtime);
     } else {
-      ret = io_ctx.stat(oid, &size, &mtime);
+      ret = io_ctx.stat3(oid, &size, &mtime, &on_fast);
     }
     if (ret < 0) {
       cerr << " error stat-ing " << pool_name << "/" << oid << ": "
@@ -2319,7 +2439,23 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
     } else {
       utime_t t(mtime, 0);
       cout << pool_name << "/" << oid
-           << " mtime " << t << ", size " << size << std::endl;
+           << " mtime " << t << ", size " << size
+           << " on_fast " << on_fast
+           << std::endl;
+    }
+  }
+  else if (strcmp(nargs[0], "pin") == 0) {
+    ret = do_pin(io_ctx, nargs[1]);
+    if (ret < 0) {
+      cerr << "err pin " << pool_name << "/" << nargs[1] << ": " << cpp_strerror(ret) << std::endl;
+      goto out;
+    }
+  }
+  else if (strcmp(nargs[0], "unpin") == 0) {
+    ret = do_unpin(io_ctx, nargs[1]);
+    if (ret < 0) {
+      cerr << "err unpin " << pool_name << "/" << nargs[1] << ": " << cpp_strerror(ret) << std::endl;
+      goto out;
     }
   }
   else if (strcmp(nargs[0], "get") == 0) {
@@ -2334,7 +2470,8 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
   else if (strcmp(nargs[0], "put") == 0) {
     if (!pool_name || nargs.size() < 3)
       usage_exit();
-    ret = do_put(io_ctx, striper, nargs[1], nargs[2], op_size, obj_offset, use_striper);
+    ret = do_put(io_ctx, striper, nargs[1], nargs[2], op_size, obj_offset,
+                 use_striper, hint_fast);
     if (ret < 0) {
       cerr << "error putting " << pool_name << "/" << nargs[1] << ": " << cpp_strerror(ret) << std::endl;
       goto out;
@@ -2704,13 +2841,15 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
       const string & oid = *iter;
       if (use_striper) {
 	if (forcefull) {
-	  ret = striper.remove(oid, CEPH_OSD_FLAG_FULL_FORCE);
+	  ret = striper.remove(oid, (CEPH_OSD_FLAG_FULL_FORCE |
+                                     CEPH_OSD_FLAG_FULL_TRY));
 	} else {
 	  ret = striper.remove(oid);
 	}
       } else {
 	if (forcefull) {
-	  ret = io_ctx.remove(oid, CEPH_OSD_FLAG_FULL_FORCE);
+	  ret = io_ctx.remove(oid, (CEPH_OSD_FLAG_FULL_FORCE |
+                                    CEPH_OSD_FLAG_FULL_TRY));
 	} else {
 	  ret = io_ctx.remove(oid);
 	}
@@ -3081,9 +3220,11 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
     else if (object_size < op_size)
       op_size = object_size;
     cout << "hints = " << (int)hints << std::endl;
+    cout << "hint_fast = " << (int)hint_fast << std::endl;
     ret = bencher.aio_bench(operation, seconds,
 			    concurrent_ios, op_size, object_size,
-			    max_objects, cleanup, hints, run_name, no_verify);
+			    max_objects, cleanup, hints, run_name, no_verify,
+                            hint_fast);
     if (ret != 0)
       cerr << "error during benchmark: " << cpp_strerror(ret) << std::endl;
     if (formatter && output)
@@ -3161,7 +3302,12 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
       cerr << "couldn't parse expected_write_size: " << err << std::endl;
       usage_exit();
     }
-    ret = io_ctx.set_alloc_hint(oid, expected_object_size, expected_write_size);
+    
+    uint32_t flags = 0;
+    if (hint_fast)
+      flags = ALLOC_HINT_FLAG_FAST_TIER;
+    ret = io_ctx.set_alloc_hint2(oid, expected_object_size, expected_write_size,
+                                flags);
     if (ret < 0) {
       cerr << "error setting alloc-hint " << pool_name << "/" << oid << ": "
            << cpp_strerror(ret) << std::endl;
@@ -3484,6 +3630,15 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
         goto out;
       }
     }
+  } else if (strcmp(nargs[0], "cache-demote-all") == 0) {
+    if (!pool_name)
+      usage_exit();
+    ret = do_cache_demote_all(io_ctx);
+    if (ret < 0) {
+      cerr << "err from do_cache_demote_all: "
+           << cpp_strerror(ret) << std::endl;
+      goto out;
+    }
   } else if (strcmp(nargs[0], "cache-flush-evict-all") == 0) {
     if (!pool_name)
       usage_exit();
@@ -3692,6 +3847,10 @@ int main(int argc, const char **argv)
       opts["no-cleanup"] = "true";
     } else if (ceph_argparse_flag(args, i, "--no-hints", (char*)NULL)) {
       opts["no-hints"] = "true";
+    } else if (ceph_argparse_flag(args, i, "--fast", (char*)NULL)) {
+      opts["fast"] = "true";
+    } else if (ceph_argparse_flag(args, i, "--more", (char*)NULL)) {
+      opts["more"] = "true";
     } else if (ceph_argparse_flag(args, i, "--no-verify", (char*)NULL)) {
       opts["no-verify"] = "true";
     } else if (ceph_argparse_witharg(args, i, &val, "--run-name", (char*)NULL)) {
