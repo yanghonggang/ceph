@@ -320,6 +320,9 @@ int parse_manifest(Dencoder* den, string ofile, string pname)
     while (getline(obj_file, obj)) {
       bufferlist manifest;
       int ret = io_ctx.getxattr(obj, "user.rgw.manifest", manifest);
+      if (ret == -ENOENT)
+        continue;
+
       if (ret < 0) {
         std::cerr << "read " << obj << "'s user.rgw.manifest failed" << std::endl;
         return ret;
