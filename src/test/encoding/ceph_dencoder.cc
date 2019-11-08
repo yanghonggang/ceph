@@ -324,8 +324,10 @@ int parse_manifest(Dencoder* den, string ofile, string pname)
         continue;
 
       if (ret < 0) {
-        std::cerr << "read " << obj << "'s user.rgw.manifest failed" << std::endl;
-        return ret;
+        std::cerr << "read " << obj << "'s user.rgw.manifest failed: "
+                  << ret << std::endl;
+        // return ret;
+        continue;
       }
       den->decode(manifest, 0);
 
