@@ -23,6 +23,7 @@
 #include "common/errno.h"
 #include "msg/Message.h"
 #include "include/assert.h"
+#include <include/rados/librados.hpp>
 
 #define TYPE(t)
 #define TYPE_STRAYDATA(t)
@@ -71,6 +72,9 @@ void usage(ostream &out)
   out << "  count_tests         print number of generated test objects (to stdout)\n";
   out << "  select_test <n>     select generated test object as in-memory object\n";
   out << "  is_deterministic    exit w/ success if type encodes deterministically\n";
+  out << "  objsfile <objfile>  path to objs file\n";
+  out << "  pool <poolname>     pool of objs\n";
+  out << "  parse_manifest      parse manifest info\n";
 }
 struct Dencoder {
   virtual ~Dencoder() {}
@@ -285,6 +289,57 @@ public:
 };
 
   
+int parse_manifest(Dencoder* den, string ofile, string pname)
+{
+  librados::Rados rados;
+
+  if (rados.init(NULL) < 0) {
+    std::cerr << "init rados error" << std::endl;
+    return -1;
+  }
+
+  if (rados.conf_read_file(NULL)) {
+    std::cerr << "read conf file error" << std::endl;
+    return -1;
+  }
+
+  if (rados.connect() < 0) {
+    std::cerr << "connect to mon error" << std::endl;
+    return -1;
+  }
+
+  librados::IoCtx io_ctx;
+  if (rados.ioctx_create(pname.c_str(), io_ctx) < 0) {
+    std::cerr << "ioctx_create error" << std::endl;
+    return -1;
+  }
+ 
+  ifstream obj_file(ofile.c_str());
+  if (obj_file) {
+    string obj;
+    while (getline(obj_file, obj)) {
+      bufferlist manifest;
+      int ret = io_ctx.getxattr(obj, "user.rgw.manifest", manifest);
+      if (ret < 0) {
+        std::cerr << "read " << obj << "'s user.rgw.manifest failed" << std::endl;
+        return ret;
+      }
+      den->decode(manifest, 0);
+
+      JSONFormatter jf(true);
+      jf.open_object_section("object");
+      den->dump(&jf);
+      jf.close_section();
+      jf.flush(cout);
+      cout << std::endl;
+    }
+  } else {
+    std::cerr << "open obj list file failed" << std::endl;
+    return -1;
+  }
+
+  return 0;
+}
 
 int main(int argc, const char **argv)
 {
@@ -322,6 +377,9 @@ int main(int argc, const char **argv)
   uint64_t features = CEPH_FEATURES_SUPPORTED_DEFAULT;
   bufferlist encbl;
   uint64_t skip = 0;
+
+  string obj_file_path = "";
+  string pool_name = "default.rgw.buckets.data";
 
   if (args.empty()) {
     usage(cerr);
@@ -385,6 +443,40 @@ int main(int argc, const char **argv)
 	exit(1);
       }
       err = den->decode(encbl, skip);
+    } else if (*i == string("objsfile")) {
+      ++i;
+      if (i == args.end()) {
+        usage(cerr);
+        exit(1);
+      }
+      obj_file_path = *i;
+    } else if (*i == string("pool")) {
+      ++i;
+      if (i == args.end()) {
+        usage(cerr);
+        exit(1);
+      }
+      pool_name = *i;
+    } else if (*i == string("parse_manifest")) {
+      if (!den) {
+	cerr << "must first select type with 'type <name>'" << std::endl;
+	usage(cerr);
+	exit(1);
+      }
+
+      if (!obj_file_path.length()) {
+        cerr << "must first specify obj list file with 'objsfile <file>'" << std::endl;
+        usage(cerr);
+        exit(1);
+      }
+
+      if (!pool_name.length()) {
+        cerr << "must first specify data pool of objects with 'pool'" << std::endl;
+        usage(cerr);
+        exit(1);
+      }
+
+      parse_manifest(den, obj_file_path, pool_name);
     } else if (*i == string("copy_ctor")) {
       if (!den) {
 	cerr << "must first select type with 'type <name>'" << std::endl;
