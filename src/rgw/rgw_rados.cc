@@ -3308,6 +3308,9 @@ class RGWRadosPutObj : public RGWHTTPStreamRWRequest::ReceiveCB
   uint64_t lofs{0}; /* logical ofs */
   std::function<int(map<string, bufferlist>&)> attrs_handler;
 public:
+  MD5 hash;
+  bool need_check_md5{false};
+
   RGWRadosPutObj(CephContext* cct,
                  CompressorRef& plugin,
                  boost::optional<RGWPutObj_Compress>& compressor,
@@ -3451,6 +3454,9 @@ public:
 
     const uint64_t lofs = data_len;
     data_len += size;
+
+    if (need_check_md5)
+      hash.Update((const unsigned char *)bl.c_str(), bl.length());
 
     return filter->process(std::move(bl), lofs);
   }
@@ -3787,6 +3793,9 @@ int RGWRados::fetch_remote_obj(RGWObjectCtx& obj_ctx,
 {
   /* source is in a different zonegroup, copy from there */
 
+  char calc_md5[CEPH_CRYPTO_MD5_DIGESTSIZE * 2 + 1];
+  unsigned char m[CEPH_CRYPTO_MD5_DIGESTSIZE];
+
   RGWRESTStreamRWRequest *in_stream_req;
   string tag;
   int i;
@@ -3865,6 +3874,15 @@ int RGWRados::fetch_remote_obj(RGWObjectCtx& obj_ctx,
                       if (ret < 0) {
                         return ret;
                       }
+
+                      const auto iter = obj_attrs.find(RGW_ATTR_ETAG);
+                      if (iter != obj_attrs.end()) {
+                        auto etag = iter->second.to_str();
+                        // skip multipart objects for now
+                        if (etag.find(std::string("-")) == std::string::npos)
+                          cb.need_check_md5 = true;
+                      }
+
                       return 0;
                     });
 
@@ -3986,10 +4004,33 @@ int RGWRados::fetch_remote_obj(RGWObjectCtx& obj_ctx,
     *src_mtime = set_mtime;
   }
 
-  if (petag) {
+  {
     const auto iter = cb.get_attrs().find(RGW_ATTR_ETAG);
     if (iter != cb.get_attrs().end()) {
-      *petag = iter->second.to_str();
+      const auto obj_etag = iter->second.to_str();
+      if (petag)
+        *petag = obj_etag;
+
+      ldout(ctx(), 20) << __func__
+                       << " object " << src_obj
+                       << "'s etag is " << obj_etag
+                       << dendl;
+
+      if (cb.need_check_md5) {
+        cb.hash.Final(m);
+        buf_to_hex(m, CEPH_CRYPTO_MD5_DIGESTSIZE, calc_md5);
+        ldout(ctx(), 20) << __func__ << " calc_md5 is " << calc_md5 << dendl;
+
+        if (std::string(calc_md5).compare(obj_etag)) {
+          ret = -ERR_BAD_DIGEST;
+          ldout(ctx(), 0) << " ERROR: The Content-MD5 of " << src_obj
+                          << " did not match what we received."
+                          << " source object etag is " << obj_etag
+                          << ", calculated content md5 is " << calc_md5
+                          << dendl;
+          goto set_err_state;
+        }
+      }
     }
   }
 
