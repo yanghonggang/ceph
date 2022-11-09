@@ -948,9 +948,9 @@ void ECBackend::handle_sub_write(
   ECSubWrite &op,
   const ZTracer::Trace &trace)
 {
-  jspan span;
   if (msg) {
     msg->mark_event("sub_op_started");
+    tracing::osd::tracer.add_span(__func__, msg->osd_parent_span);
   }
   trace.event("handle_sub_write");
 
@@ -1549,9 +1549,9 @@ void ECBackend::submit_transaction(
   op->tid = tid;
   op->reqid = reqid;
   op->client_op = client_op;
-  jspan span;
   if (client_op) {
     op->trace = client_op->pg_trace;
+    tracing::osd::tracer.add_span("ECBackend::submit_transaction", client_op->osd_parent_span);
   }
   dout(10) << __func__ << ": op " << *op << " starting" << dendl;
   start_rmw(op, std::move(t));
@@ -2123,6 +2123,10 @@ bool ECBackend::try_reads_to_commit()
       r->trace = trace;
       messages.push_back(std::make_pair(i->osd, r));
     }
+  }
+
+  if (op->client_op) {
+    tracing::osd::tracer.add_span("EC sub write", op->client_op->osd_parent_span);
   }
 
   if (!messages.empty()) {
