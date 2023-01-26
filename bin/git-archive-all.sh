@@ -36,7 +36,10 @@
 
 # DEBUGGING
 set -e
+set -x
 set -C # noclobber
+
+source offline-build.sh
 
 # TRAP SIGNALS
 trap 'cleanup' QUIT EXIT
@@ -208,43 +211,61 @@ echo $TMPDIR/$(basename "$(pwd)").$FORMAT >| $TMPFILE # clobber on purpose
 superfile=`head -n 1 $TMPFILE`
 
 if [ $VERBOSE -eq 1 ]; then
-    echo -n "looking for subprojects..."
-fi
-# find all '.git' dirs, these show us the remaining to-be-archived dirs
-# we only want directories that are below the current directory
-find . -mindepth 2 -name '.git' -type d -print | sed -e 's/^\.\///' -e 's/\.git$//' >> $TOARCHIVE
-# as of version 1.7.8, git places the submodule .git directories under the superprojects .git dir
-# the submodules get a .git file that points to their .git dir. we need to find all of these too
-find . -mindepth 2 -name '.git' -type f -print | xargs grep -l "gitdir" | sed -e 's/^\.\///' -e 's/\.git$//' >> $TOARCHIVE
-
-if [ -n "$IGNORE" ]; then
-    cat $TOARCHIVE | grep -v $IGNORE > $TOARCHIVE.new
-    mv $TOARCHIVE.new $TOARCHIVE
+  echo -n "archiving submodules..."
 fi
 
-if [ $VERBOSE -eq 1 ]; then
-    echo "done"
-    echo "  found:"
-    cat $TOARCHIVE | while read arch
-    do
-      echo "    $arch"
-    done
-fi
+if [ $OFFLINE_BUIlD ]; then
+  rm -rf submodules
+  wget -r -np -nH -R index.html ${LOCAL_FILE_SERVER}/submodules
+  pushd `pwd`
+  cd submodules
+  for f in `ls`
+  do
+    tar -xf $f
+  done
+  old_prefix=$(ls | grep ceph)
+  tar --transform "s/^${old_prefix}/${PREFIX}" -cf sub.tar $old_prefix
+  mv sub.tar ${TMPDIR}
+  echo  ${TMPDIR}/sub.tar >> ${TMPFILE}
+  popd
+else
+  if [ $VERBOSE -eq 1 ]; then
+      echo -n "looking for subprojects..."
+  fi
 
-if [ $VERBOSE -eq 1 ]; then
-    echo -n "archiving submodules..."
+  # find all '.git' dirs, these show us the remaining to-be-archived dirs
+  # we only want directories that are below the current directory
+  find . -mindepth 2 -name '.git' -type d -print | sed -e 's/^\.\///' -e 's/\.git$//' >> $TOARCHIVE
+  # as of version 1.7.8, git places the submodule .git directories under the superprojects .git dir
+  # the submodules get a .git file that points to their .git dir. we need to find all of these too
+  find . -mindepth 2 -name '.git' -type f -print | xargs grep -l "gitdir" | sed -e 's/^\.\///' -e 's/\.git$//' >> $TOARCHIVE
+
+  if [ -n "$IGNORE" ]; then
+      cat $TOARCHIVE | grep -v $IGNORE > $TOARCHIVE.new
+      mv $TOARCHIVE.new $TOARCHIVE
+  fi
+
+  if [ $VERBOSE -eq 1 ]; then
+      echo "done"
+      echo "  found:"
+      cat $TOARCHIVE | while read arch
+      do
+        echo "    $arch"
+      done
+  fi
+
+  while read path; do
+      TREEISH=$(git submodule | grep "^ .*${path%/} " | cut -d ' ' -f 2) # git submodule does not list trailing slashes in $path
+      cd "$path"
+      git archive --format=$FORMAT --prefix="${PREFIX}$path" ${TREEISH:-HEAD} > "$TMPDIR"/"$(echo "$path" | sed -e 's/\//./g')"$FORMAT
+      if [ $FORMAT == 'zip' ]; then
+          # delete the empty directory entry; zipped submodules won't unzip if we don't do this
+          zip -d "$(tail -n 1 $TMPFILE)" "${PREFIX}${path%/}" >/dev/null # remove trailing '/'
+      fi
+      echo "$TMPDIR"/"$(echo "$path" | sed -e 's/\//./g')"$FORMAT >> $TMPFILE
+      cd "$OLD_PWD"
+  done < $TOARCHIVE
 fi
-while read path; do
-    TREEISH=$(git submodule | grep "^ .*${path%/} " | cut -d ' ' -f 2) # git submodule does not list trailing slashes in $path
-    cd "$path"
-    git archive --format=$FORMAT --prefix="${PREFIX}$path" ${TREEISH:-HEAD} > "$TMPDIR"/"$(echo "$path" | sed -e 's/\//./g')"$FORMAT
-    if [ $FORMAT == 'zip' ]; then
-        # delete the empty directory entry; zipped submodules won't unzip if we don't do this
-        zip -d "$(tail -n 1 $TMPFILE)" "${PREFIX}${path%/}" >/dev/null # remove trailing '/'
-    fi
-    echo "$TMPDIR"/"$(echo "$path" | sed -e 's/\//./g')"$FORMAT >> $TMPFILE
-    cd "$OLD_PWD"
-done < $TOARCHIVE
 if [ $VERBOSE -eq 1 ]; then
     echo "done"
 fi
