@@ -24,6 +24,10 @@
 %bcond_with zbd
 %bcond_with cmake_verbose_logging
 %bcond_without ceph_test_package
+%bcond_without radosgw
+%bcond_without amqp_endpoint
+%bcond_without kafka_endpoint
+%bcond_without lua_packages
 %ifarch s390
 %bcond_with tcmalloc
 %else
@@ -51,20 +55,15 @@
 %else
 %bcond_without cephfs_java
 %endif
-%bcond_without amqp_endpoint
-%bcond_without kafka_endpoint
 %bcond_without lttng
 %bcond_without libradosstriper
 %bcond_without ocf
 %global luarocks_package_name luarocks
-%bcond_without lua_packages
 %global _remote_tarball_prefix https://download.ceph.com/tarballs/
 %endif
 %if 0%{?suse_version}
 %bcond_without system_pmdk
-%bcond_with amqp_endpoint
 %bcond_with cephfs_java
-%bcond_with kafka_endpoint
 %bcond_with libradosstriper
 %ifarch x86_64 aarch64 ppc64le
 %bcond_without lttng
@@ -80,7 +79,6 @@
 #luarocks
 %if 0%{?is_opensuse}
 # openSUSE
-%bcond_without lua_packages
 %if 0%{?sle_version}
 # openSUSE Leap
 %global luarocks_package_name lua53-luarocks
@@ -90,7 +88,6 @@
 %endif
 %else
 # SLE
-%bcond_with lua_packages
 %endif
 %endif
 %bcond_with seastar
@@ -786,6 +783,7 @@ Requires:	librbd1 = %{_epoch_prefix}%{version}-%{release}
 %description -n rbd-nbd
 NBD based client to map Ceph rbd images to local device
 
+%if 0%{with radosgw}
 %package radosgw
 Summary:	Rados REST gateway
 %if 0%{?suse_version}
@@ -808,6 +806,7 @@ RADOS is a distributed object store used by the Ceph distributed
 storage system.  This package provides a REST gateway to the
 object store that aims to implement a superset of Amazon's S3
 service as well as the OpenStack Object Storage ("Swift") API.
+%endif
 
 %package -n cephfs-top
 Summary:    top(1) like utility for Ceph Filesystem
@@ -1381,6 +1380,11 @@ cmake .. \
 %if 0%{with jaeger}
     -DWITH_JAEGER:BOOL=ON \
 %endif
+%if 0%{with radosgw}
+    -DWITH_RADOSGW:BOOL=ON \
+%else
+    -DWITH_RADOSGW:BOOL=OFF \
+%endif
 %if 0%{?suse_version}
     -DBOOST_J:STRING=%{jobs} \
 %else
@@ -1488,7 +1492,9 @@ mkdir -p %{buildroot}%{_localstatedir}/lib/ceph/mds
 mkdir -p %{buildroot}%{_localstatedir}/lib/ceph/mgr
 mkdir -p %{buildroot}%{_localstatedir}/lib/ceph/crash
 mkdir -p %{buildroot}%{_localstatedir}/lib/ceph/crash/posted
+%if 0%{with radosgw}
 mkdir -p %{buildroot}%{_localstatedir}/lib/ceph/radosgw
+%endif
 mkdir -p %{buildroot}%{_localstatedir}/lib/ceph/bootstrap-osd
 mkdir -p %{buildroot}%{_localstatedir}/lib/ceph/bootstrap-mds
 mkdir -p %{buildroot}%{_localstatedir}/lib/ceph/bootstrap-rgw
@@ -1631,7 +1637,9 @@ exit 0
 %{_bindir}/cephfs-table-tool
 %{_bindir}/crushdiff
 %{_bindir}/rados
+%if 0%{with radosgw}
 %{_bindir}/radosgw-admin
+%endif
 %{_bindir}/rbd
 %{_bindir}/rbd-replay
 %{_bindir}/rbd-replay-many
@@ -1658,7 +1666,9 @@ exit 0
 %{_mandir}/man8/crushdiff.8*
 %{_mandir}/man8/mount.ceph.8*
 %{_mandir}/man8/rados.8*
+%if 0%{with radosgw}
 %{_mandir}/man8/radosgw-admin.8*
+%endif
 %{_mandir}/man8/rbd.8*
 %{_mandir}/man8/rbdmap.8*
 %{_mandir}/man8/rbd-replay.8*
@@ -1673,7 +1683,9 @@ exit 0
 %config %{_sysconfdir}/bash_completion.d/ceph
 %config %{_sysconfdir}/bash_completion.d/rados
 %config %{_sysconfdir}/bash_completion.d/rbd
+%if 0%{with radosgw}
 %config %{_sysconfdir}/bash_completion.d/radosgw-admin
+%endif
 %config(noreplace) %{_sysconfdir}/ceph/rbdmap
 %{_unitdir}/rbdmap.service
 %dir %{_udevrulesdir}
@@ -2087,6 +2099,7 @@ fi
 %dir %{_libexecdir}/rbd-nbd
 %{_libexecdir}/rbd-nbd/rbd-nbd_quiesce
 
+%if 0%{with radosgw}
 %files radosgw
 %{_bindir}/ceph-diff-sorted
 %{_bindir}/radosgw
@@ -2138,6 +2151,7 @@ if [ $1 -ge 1 ] ; then
     /usr/bin/systemctl try-restart ceph-radosgw@\*.service > /dev/null 2>&1 || :
   fi
 fi
+%endif
 
 %files osd
 %{_bindir}/ceph-clsinfo
