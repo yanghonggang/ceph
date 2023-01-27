@@ -215,10 +215,10 @@ if [ $VERBOSE -eq 1 ]; then
 fi
 
 if [ $OFFLINE_BUIlD ]; then
-  rm -rf submodules
-  wget -r -np -nH -R index.html ${LOCAL_FILE_SERVER}/submodules
+  rm -rf submodules.tmp
+  wget -r -np -nH -R index.html ${LOCAL_FILE_SERVER}/submodules -P submodules.tmp
   pushd `pwd`
-  cd submodules
+  cd $(dirname `find submodules.tmp/ -name "*.tar"| tail -n 1`)
   for f in `ls`
   do
     tar -xf $f
