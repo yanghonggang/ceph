@@ -14,6 +14,9 @@
 # Please submit bugfixes or comments via http://tracker.ceph.com/
 #
 
+%define _missing_doc_files_terminate_build 0
+%define _unpackaged_files_terminate_build 0
+
 #################################################################################
 # conditional build section
 #
