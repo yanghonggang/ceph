@@ -467,7 +467,9 @@ Requires:      ceph-common = %{_epoch_prefix}%{version}-%{release}
 Requires:      librbd1 = %{_epoch_prefix}%{version}-%{release}
 Requires:      librados2 = %{_epoch_prefix}%{version}-%{release}
 Requires:      libcephfs2 = %{_epoch_prefix}%{version}-%{release}
+%if 0%{with radosgw}
 Requires:      librgw2 = %{_epoch_prefix}%{version}-%{release}
+%endif
 %if 0%{with selinux}
 Requires:      ceph-selinux = %{_epoch_prefix}%{version}-%{release}
 %endif
@@ -521,7 +523,9 @@ Requires:	libcephfs2 = %{_epoch_prefix}%{version}-%{release}
 Requires:	python%{python3_pkgversion}-rados = %{_epoch_prefix}%{version}-%{release}
 Requires:	python%{python3_pkgversion}-rbd = %{_epoch_prefix}%{version}-%{release}
 Requires:	python%{python3_pkgversion}-cephfs = %{_epoch_prefix}%{version}-%{release}
+%if 0%{with radosgw}
 Requires:	python%{python3_pkgversion}-rgw = %{_epoch_prefix}%{version}-%{release}
+%endif
 Requires:	python%{python3_pkgversion}-ceph-argparse = %{_epoch_prefix}%{version}-%{release}
 Requires:	python%{python3_pkgversion}-ceph-common = %{_epoch_prefix}%{version}-%{release}
 %if 0%{?fedora} || 0%{?rhel}
@@ -920,6 +924,7 @@ Requires:	librados-devel = %{_epoch_prefix}%{version}-%{release}
 This package contains C++ libraries and headers needed to develop programs
 that use RADOS object store.
 
+%if 0%{with radosgw}
 %package -n librgw2
 Summary:	RADOS gateway client library
 %if 0%{?suse_version}
@@ -956,6 +961,7 @@ Obsoletes:	python-rgw < %{_epoch_prefix}%{version}-%{release}
 %description -n python%{python3_pkgversion}-rgw
 This package contains Python 3 libraries for interacting with Ceph RADOS
 gateway.
+%endif
 
 %package -n python%{python3_pkgversion}-rados
 Summary:	Python 3 libraries for the RADOS object store
@@ -1497,7 +1503,9 @@ mkdir -p %{buildroot}%{_localstatedir}/lib/ceph/radosgw
 %endif
 mkdir -p %{buildroot}%{_localstatedir}/lib/ceph/bootstrap-osd
 mkdir -p %{buildroot}%{_localstatedir}/lib/ceph/bootstrap-mds
+%if 0%{with radosgw}
 mkdir -p %{buildroot}%{_localstatedir}/lib/ceph/bootstrap-rgw
+%endif
 mkdir -p %{buildroot}%{_localstatedir}/lib/ceph/bootstrap-mgr
 mkdir -p %{buildroot}%{_localstatedir}/lib/ceph/bootstrap-rbd
 mkdir -p %{buildroot}%{_localstatedir}/lib/ceph/bootstrap-rbd-mirror
@@ -1572,7 +1580,9 @@ rm -rf %{_vpath_builddir}
 %attr(750,ceph,ceph) %dir %{_localstatedir}/lib/ceph/tmp
 %attr(750,ceph,ceph) %dir %{_localstatedir}/lib/ceph/bootstrap-osd
 %attr(750,ceph,ceph) %dir %{_localstatedir}/lib/ceph/bootstrap-mds
+%if 0%{with radosgw}
 %attr(750,ceph,ceph) %dir %{_localstatedir}/lib/ceph/bootstrap-rgw
+%endif
 %attr(750,ceph,ceph) %dir %{_localstatedir}/lib/ceph/bootstrap-mgr
 %attr(750,ceph,ceph) %dir %{_localstatedir}/lib/ceph/bootstrap-rbd
 %attr(750,ceph,ceph) %dir %{_localstatedir}/lib/ceph/bootstrap-rbd-mirror
@@ -1658,7 +1668,9 @@ exit 0
 %{_mandir}/man8/ceph-authtool.8*
 %{_mandir}/man8/ceph-conf.8*
 %{_mandir}/man8/ceph-dencoder.8*
+%if 0%{with radosgw}
 %{_mandir}/man8/ceph-diff-sorted.8*
+%endif
 %{_mandir}/man8/ceph-rbdnamer.8*
 %{_mandir}/man8/ceph-syn.8*
 %{_mandir}/man8/ceph-post-file.8*
@@ -1674,7 +1686,9 @@ exit 0
 %{_mandir}/man8/rbd-replay.8*
 %{_mandir}/man8/rbd-replay-many.8*
 %{_mandir}/man8/rbd-replay-prep.8*
+%if 0%{with radosgw}
 %{_mandir}/man8/rgw-orphan-list.8*
+%endif
 %dir %{_datadir}/ceph/
 %{_datadir}/ceph/known_hosts_drop.ceph.com
 %{_datadir}/ceph/id_rsa_drop.ceph.com
@@ -2352,6 +2366,7 @@ fi
 %{_libdir}/librbd_tp.so
 %endif
 
+%if 0%{with radosgw}
 %files -n librgw2
 %{_libdir}/librgw.so.*
 %if %{with lttng}
@@ -2376,6 +2391,7 @@ fi
 %files -n python%{python3_pkgversion}-rgw
 %{python3_sitearch}/rgw.cpython*.so
 %{python3_sitearch}/rgw-*.egg-info
+%endif
 
 %files -n python%{python3_pkgversion}-rbd
 %{python3_sitearch}/rbd.cpython*.so
@@ -2437,8 +2453,10 @@ fi
 %{_bindir}/ceph_perf_msgr_server
 %{_bindir}/ceph_psim
 %{_bindir}/ceph_radosacl
+%if 0%{with radosgw}
 %{_bindir}/ceph_rgw_jsonparser
 %{_bindir}/ceph_rgw_multiparser
+%endif
 %{_bindir}/ceph_scratchtool
 %{_bindir}/ceph_scratchtoolpp
 %{_bindir}/ceph_test_*
