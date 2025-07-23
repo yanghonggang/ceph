@@ -74,13 +74,29 @@ config_ctx_t config_ctx_create();
 void config_ctx_destroy(config_ctx_t cct);
 
 /**
- * Create a handle of ObjectStore.
+ * Create an ObjectStore instance.
  *
  * @param cct ObjectStore configuration context
+ * @param type type of store
+ * @param data path (or other descriptor) for data
  * @param os where to store the ObjectStore handle
  * @returns 0 on success, negative error code on failure
  */
-int os_create(config_ctx_t cct, object_store_t *os);
+int os_create(config_ctx_t cct, const char* type, const char* data,
+  object_store_t *os);
+
+/**
+ * Destroy an ObjectStore instance.
+ *
+ * This function destroys the specified ObjectStore instance. After calling this
+ * function, the ObjectStore handle should no longer be used.
+ *
+ * @param os The handle of the ObjectStore instance to destroy. This handle must
+ *           have been previously obtained from a successful call to os_create().
+ * @returns 0 on success, negative error code on failure. If the ObjectStore
+ *          instance is not found, -ENOENT is returned.
+ */
+int os_destroy(object_store_t os);
 
 /**
  * Format ObjectStore's disk(s).
