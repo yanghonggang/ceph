@@ -25,6 +25,9 @@ static CephContext *create_cct(const char * const clustername,
   cct->_conf.parse_env(cct->get_module_type()); // environment variables override
   cct->_conf.apply_changes(nullptr);
 
+  // FIXME: global_init_set_globals(cct);
+  g_ceph_context = cct;
+
   return cct;
 }
 
@@ -75,4 +78,20 @@ extern "C" int os_destroy(object_store_t os)
   }
 
   return -ENOENT;
+}
+
+extern "C" int os_mkfs(object_store_t os_)
+{
+  ObjectStore* os = static_cast<ObjectStore*>(os_);
+  if (!os) {
+    std::cerr << "os is null" << std::endl;
+    return -EINVAL;
+  }
+
+  int ret = os->mkfs();
+  if (ret) {
+    std::cerr << "mkfs failed: ret=" << ret << std::endl;
+  }
+
+  return 0;
 }

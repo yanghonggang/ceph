@@ -24,6 +24,14 @@ int main() {
     }
     printf("ObjectStore created successfully: %p\n", (void*)os);
 
+    ret = os_mkfs(os);
+    if (ret < 0) {
+      fprintf(stderr, "os_mkfs failed with error: %d (%s)\n", ret,
+        strerror(-ret));
+    } else {
+      printf("ObjectStore os_mkfs successfully\n");
+    }
+
     ret = os_destroy(os);
     if (ret < 0) {
       fprintf(stderr, "os_destroy failed with error: %d (%s)\n", ret,
