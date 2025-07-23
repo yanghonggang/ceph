@@ -2,7 +2,7 @@ add_library(objectstore SHARED
   libobjectstore_c.cc
 )
 
-target_link_libraries(objectstore PRIVATE ceph-common)
+target_link_libraries(objectstore PRIVATE common ${ceph_common_deps})
 
 #  ${BLKID_LIBRARIES} ${CRYPTO_LIBS} ${EXTRALIBS} ${GSSAPI_LIBRARIES})
 
