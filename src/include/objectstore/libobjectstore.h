@@ -172,6 +172,15 @@ void os_release_transaction(transaction_t tx);
 collection_t os_create_new_collection(object_store_t os, cid_t cid);
 
 /**
+ * Release a collection.
+ *
+ * @param coll_ A pointer to the collection previously obtained from
+ *              `os_create_new_collection`. Passing NULL is allowed and results
+ *              in no operation.
+ */
+void os_release_collection(collection_t coll);
+
+/**
  * Add a collection creation operation to the specified transaction.
  *
  * @param tx transaction within which the collection creation will be executed

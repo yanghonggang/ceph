@@ -39,9 +39,23 @@ int main() {
         strerror(-ret));
       goto cleanup;
     }
-
     printf("#ObjectStore mount successfully: %p\n", (void*)os);
 
+    {
+      cid_t cid = 12345;
+      collection_t coll = os_create_new_collection(os, cid);
+      if (!coll) {
+        fprintf(stderr, "os_create_new_collection failed\n");
+        goto umount;
+      }
+      printf("#Collection created successfully: %p\n", (void*)coll);
+
+
+      os_release_collection(coll);
+      printf("#Collection released successfully: %p\n", (void*)coll);
+    }
+
+umount:
     ret = os_umount(os);
     if (ret < 0) {
       printf("os_mount failed with error: %d (%s)\n", ret,
@@ -56,7 +70,7 @@ int main() {
         strerror(-ret));
         goto cleanup;
     } else {
-      printf("#ObjectStore destroyed successfully\n");
+      printf("#ObjectStore destroyed successfully: %p\n", (void*)os);
     }
 
     ret = os_destroy(os);
@@ -69,7 +83,7 @@ int main() {
 
 cleanup:
   config_ctx_destroy(ctx);
-  printf("#Config context destroyed.\n");
+  printf("#Config context destroyed: %p\n", (void*)ctx);
 
   return ret;
 }

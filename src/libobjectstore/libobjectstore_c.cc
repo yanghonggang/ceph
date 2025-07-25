@@ -130,3 +130,38 @@ extern "C" int os_umount(object_store_t os_)
 
   return 0;
 }
+
+#define PG_ID (0)
+
+extern "C" collection_t os_create_new_collection(object_store_t os_, cid_t cid_)
+{
+  ObjectStore* os = static_cast<ObjectStore*>(os_);
+  if (!os) {
+    std::cerr << "os is null" << std::endl;
+    return nullptr;
+  }
+
+  // FIXME: 增加一个根据 pool/pg 生成 coll_t 的辅助函数
+  ps_t pg = PG_ID;
+  int64_t poolid = cid_;
+  coll_t cid = coll_t(spg_t(pg_t(pg, poolid), shard_id_t::NO_SHARD));
+  std::cout << "cid=" << cid << std::endl;
+  ObjectStore::CollectionHandle ch = os->create_new_collection(cid);
+  if (!ch) {
+    std::cerr << "create_new_collection failed" << std::endl;
+    return nullptr;
+  }
+
+  return static_cast<void*>(ch.detach());
+}
+
+extern "C" void os_release_collection(collection_t coll_)
+{
+  if (!coll_) {
+    return;
+  }
+
+  ObjectStore::CollectionImpl *coll =
+    static_cast<ObjectStore::CollectionImpl*>(coll_);
+  coll->put();
+}
