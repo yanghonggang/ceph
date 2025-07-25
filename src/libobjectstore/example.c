@@ -50,7 +50,6 @@ int main() {
     }
     printf("#ObjectStore umount successfully: %p\n", (void*)os);
 
-#if 0
     ret = os_destroy(os);
     if (ret < 0) {
       fprintf(stderr, "os_destroy failed with error: %d (%s)\n", ret,
@@ -66,7 +65,6 @@ int main() {
         strerror(-ret));
     }
     os = NULL;
-#endif
   }
 
 cleanup:
