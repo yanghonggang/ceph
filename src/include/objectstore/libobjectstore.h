@@ -116,7 +116,7 @@ int os_mkfs(object_store_t os);
  * @param os ObjectStore handle
  * @returns 0 on success, negative error code on failure
  */
-int os_mount(object_store_t *os);
+int os_mount(object_store_t os);
 
 /**
  * Drain inprogress requests and sync ObjectStore metadata to disk(s).

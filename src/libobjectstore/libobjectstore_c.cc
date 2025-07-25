@@ -53,7 +53,7 @@ extern "C" int os_create(config_ctx_t cct_, const char* type, const char* data,
   CephContext *cct = static_cast<CephContext*>(cct_);
   std::unique_ptr<ObjectStore> os = ObjectStore::create(cct, type, data, "", 0);
   if (!os) {
-    std::cerr << "Unable to create store of type " << type << std::endl;
+    std::cerr << "unable to create store of type " << type << std::endl;
     return -1;
   }
 
@@ -91,6 +91,38 @@ extern "C" int os_mkfs(object_store_t os_)
   int ret = os->mkfs();
   if (ret) {
     std::cerr << "mkfs failed: ret=" << ret << std::endl;
+  }
+
+  return 0;
+}
+
+extern "C" int os_mount(object_store_t os_)
+{
+  ObjectStore* os = static_cast<ObjectStore*>(os_);
+  if (!os) {
+    std::cerr << "os is null" << std::endl;
+    return -EINVAL;
+  }
+
+  int ret = os->mount();
+  if (ret) {
+    std::cerr << "mount failed: ret=" << ret << std::endl;
+  }
+
+  return 0;
+}
+
+extern "C" int os_umount(object_store_t os_)
+{
+  ObjectStore* os = static_cast<ObjectStore*>(os_);
+  if (!os) {
+    std::cerr << "os is null" << std::endl;
+    return -EINVAL;
+  }
+
+  int ret = os->umount();
+  if (ret) {
+    std::cerr << "umount failed: ret=" << ret << std::endl;
   }
 
   return 0;
