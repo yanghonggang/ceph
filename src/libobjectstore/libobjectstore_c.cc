@@ -10,7 +10,7 @@
 namespace {
 
 std::mutex store_mutex;
-std::vector<std::unique_ptr<ObjectStore>> store_instances;
+std::unordered_map<ObjectStore*, std::unique_ptr<ObjectStore>> store_instances;
 
 } // anonymous namespace
 
@@ -57,23 +57,26 @@ extern "C" int os_create(config_ctx_t cct_, const char* type, const char* data,
     return -1;
   }
 
-  store_instances.push_back(std::move(os));
-  *os_ = static_cast<void*>(store_instances.back().get());
+  ObjectStore* raw = os.get();
+  store_instances[raw] = std::move(os);
+  *os_ = static_cast<void*>(raw);
 
   return 0;
 }
 
-extern "C" int os_destroy(object_store_t os)
+extern "C" int os_destroy(object_store_t os_)
 {
+  if (!os_) {
+    return -EINVAL;
+  }
+
+  ObjectStore* os = static_cast<ObjectStore*>(os_);
+
   std::lock_guard<std::mutex> lock(store_mutex);
 
-  ObjectStore* os_ptr = static_cast<ObjectStore*>(os);
-  auto it = std::remove_if(store_instances.begin(), store_instances.end(),
-    [os_ptr](const std::unique_ptr<ObjectStore>& item) {
-      return item.get() == os_ptr;
-    });
+  auto it = store_instances.find(os);
   if (it != store_instances.end()) {
-    store_instances.erase(it, store_instances.end());
+    store_instances.erase(it);
     return 0;
   }
 
