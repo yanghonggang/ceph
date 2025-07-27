@@ -137,6 +137,16 @@ struct C_Collection {
   ObjectStore::CollectionHandle ch;
 };
 
+static inline coll_t get_coll_t(cid_t cid_)
+{
+  ps_t pg = PG_ID;
+  int64_t poolid = cid_;
+  coll_t cid = coll_t(spg_t(pg_t(pg, poolid), shard_id_t::NO_SHARD));
+  std::cout << "cid=" << cid << std::endl;
+
+  return cid;
+}
+
 extern "C" collection_t os_create_new_collection(object_store_t os_, cid_t cid_)
 {
   ObjectStore* os = static_cast<ObjectStore*>(os_);
@@ -145,11 +155,7 @@ extern "C" collection_t os_create_new_collection(object_store_t os_, cid_t cid_)
     return nullptr;
   }
 
-  // FIXME: 增加一个根据 pool/pg 生成 coll_t 的辅助函数
-  ps_t pg = PG_ID;
-  int64_t poolid = cid_;
-  coll_t cid = coll_t(spg_t(pg_t(pg, poolid), shard_id_t::NO_SHARD));
-  std::cout << "cid=" << cid << std::endl;
+  coll_t cid = get_coll_t(cid_);
   ObjectStore::CollectionHandle ch = os->create_new_collection(cid);
   if (!ch) {
     std::cerr << "create_new_collection failed" << std::endl;
@@ -207,6 +213,25 @@ extern "C" int os_transaction_create_collection(transaction_t tx,
   return 0;
 }
 
+extern "C" int os_transaction_object_write(transaction_t tx, cid_t cid_,
+  const char *oid, const char *data, uint64_t offset, uint64_t len,
+  uint32_t flags)
+{
+  C_Transaction* ct = static_cast<C_Transaction*>(tx);
+  if (!ct || !ct->tx || !oid || !data) {
+    return -EINVAL;
+  }
+
+  coll_t cid = get_coll_t(cid_);
+  ghobject_t hoid(hobject_t(oid, "", CEPH_NOSNAP, 0, cid.pool(), ""));
+  bufferlist bl;
+  bl.append(data);
+
+  ct->tx->write(cid, hoid, offset, len, bl, flags);
+
+  return 0;
+}
+
 extern "C" int os_queue_transaction(object_store_t os_, collection_t coll,
   transaction_t tx)
 {
@@ -221,3 +246,4 @@ extern "C" int os_queue_transaction(object_store_t os_, collection_t coll,
 
   return 0;
 }
+

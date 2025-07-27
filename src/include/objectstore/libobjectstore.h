@@ -206,8 +206,9 @@ int os_transaction_create_collection(transaction_t tx, collection_t c);
  * @param len length of buffer
  * @param data bytes to be written
  * @param flags flags specifying additional options for the write operation
+ * @returns 0 on success, negative error code on failure
  */
-void os_transaction_object_write(transaction_t tx, cid_t cid, const char *oid,
+int os_transaction_object_write(transaction_t tx, cid_t cid, const char *oid,
                                  const char *data, uint64_t offset,
                                  uint64_t len, uint32_t flags);
 
