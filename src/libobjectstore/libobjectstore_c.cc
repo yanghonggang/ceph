@@ -165,3 +165,41 @@ extern "C" void os_release_collection(collection_t coll_)
     static_cast<ObjectStore::CollectionImpl*>(coll_);
   coll->put();
 }
+
+struct C_Transaction {
+  std::unique_ptr<ObjectStore::Transaction> tx;
+};
+
+extern "C" transaction_t os_create_transaction()
+{
+  C_Transaction* ct = new C_Transaction();
+  ct->tx = std::make_unique<ObjectStore::Transaction>();
+  return static_cast<transaction_t>(ct);
+}
+
+extern "C" void os_release_transaction(transaction_t tx_)
+{
+  if (!tx_) {
+    return;
+  }
+
+  C_Transaction* ct = static_cast<C_Transaction*>(tx_);
+  delete ct;
+}
+
+extern "C" int os_transaction_create_collection(transaction_t tx,
+  collection_t coll_)
+{
+  C_Transaction* ct = static_cast<C_Transaction*>(tx);
+   if (!ct || !ct->tx || !coll_) {
+    return -EINVAL;
+  }
+
+  ObjectStore::CollectionImpl *coll =
+    static_cast<ObjectStore::CollectionImpl*>(coll_);
+
+  int split_bits = 0;
+  ct->tx->create_collection(coll->cid, split_bits);
+
+  return 0;
+}

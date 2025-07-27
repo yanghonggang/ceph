@@ -185,8 +185,9 @@ void os_release_collection(collection_t coll);
  *
  * @param tx transaction within which the collection creation will be executed
  * @param c collection handle returned by os_create_new_collection()
+ * @returns 0 on success, negative error code on failure
  */
-void os_transaction_create_collection(transaction_t tx, collection_t c);
+int os_transaction_create_collection(transaction_t tx, collection_t c);
 
 /**
  * Add an object write operation to the specified transaction.
