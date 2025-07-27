@@ -133,6 +133,10 @@ extern "C" int os_umount(object_store_t os_)
 
 #define PG_ID (0)
 
+struct C_Collection {
+  ObjectStore::CollectionHandle ch;
+};
+
 extern "C" collection_t os_create_new_collection(object_store_t os_, cid_t cid_)
 {
   ObjectStore* os = static_cast<ObjectStore*>(os_);
@@ -152,18 +156,19 @@ extern "C" collection_t os_create_new_collection(object_store_t os_, cid_t cid_)
     return nullptr;
   }
 
-  return static_cast<void*>(ch.detach());
+  C_Collection *cc = new C_Collection;
+  cc->ch = ch;
+
+  return static_cast<collection_t>(cc);
 }
 
-extern "C" void os_release_collection(collection_t coll_)
+extern "C" void os_release_collection(collection_t coll)
 {
-  if (!coll_) {
+  C_Collection *cc = static_cast<C_Collection*>(coll);
+  if (!cc || !cc->ch) {
     return;
   }
-
-  ObjectStore::CollectionImpl *coll =
-    static_cast<ObjectStore::CollectionImpl*>(coll_);
-  coll->put();
+  delete cc;
 }
 
 struct C_Transaction {
@@ -188,18 +193,31 @@ extern "C" void os_release_transaction(transaction_t tx_)
 }
 
 extern "C" int os_transaction_create_collection(transaction_t tx,
-  collection_t coll_)
+  collection_t coll)
 {
   C_Transaction* ct = static_cast<C_Transaction*>(tx);
-   if (!ct || !ct->tx || !coll_) {
+  C_Collection *cc = static_cast<C_Collection*>(coll);
+   if (!ct || !ct->tx || !cc || !cc->ch) {
     return -EINVAL;
   }
 
-  ObjectStore::CollectionImpl *coll =
-    static_cast<ObjectStore::CollectionImpl*>(coll_);
-
   int split_bits = 0;
-  ct->tx->create_collection(coll->cid, split_bits);
+  ct->tx->create_collection(cc->ch->cid, split_bits);
+
+  return 0;
+}
+
+extern "C" int os_queue_transaction(object_store_t os_, collection_t coll,
+  transaction_t tx)
+{
+  C_Transaction* ct = static_cast<C_Transaction*>(tx);
+  C_Collection *cc = static_cast<C_Collection*>(coll);
+  if (!os_ || !ct || !ct->tx || !cc || !cc->ch) {
+    return -EINVAL;
+  }
+  ObjectStore* os = static_cast<ObjectStore*>(os_);
+
+  os->queue_transaction(cc->ch, std::move(*ct->tx));
 
   return 0;
 }

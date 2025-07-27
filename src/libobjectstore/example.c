@@ -50,7 +50,32 @@ int main() {
       }
       printf("#Collection created successfully: %p\n", (void*)coll);
 
+      transaction_t tx = os_create_transaction();
+      if (!tx) {
+        fprintf(stderr, "os_transaction_create failed\n");
+        goto release_coll;
+      }
+      printf("#Transaction created successfully: %p\n", (void*)tx);
 
+      ret = os_transaction_create_collection(tx, coll);
+      if (ret < 0) {
+        fprintf(stderr, "os_transaction_create_collection failed: %d (%s)\n", ret, strerror(-ret));
+        goto release_tx;
+      }
+      printf("#Transaction: create collection successfully\n");
+
+      ret = os_queue_transaction(os, coll, tx);
+      if (ret < 0) {
+        fprintf(stderr, "os_queue_transaction failed: %d (%s)\n", ret, strerror(-ret));
+        goto release_tx;
+      }
+      printf("#Transaction queued successfully\n");
+
+release_tx:
+      os_release_transaction(tx);
+      printf("#Transaction destroyed successfully: %p\n", (void*)tx);
+
+release_coll:
       os_release_collection(coll);
       printf("#Collection released successfully: %p\n", (void*)coll);
     }
