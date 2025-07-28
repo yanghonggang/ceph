@@ -221,6 +221,13 @@ release_coll2:
       }
       printf("#Transaction tx3: object zero successfully\n");
 
+      ret = os_transaction_collection_remove(tx3, cid);
+      if (ret < 0) {
+          fprintf(stderr, "os_transaction_collection_remove failed in tx3: %d (%s)\n", ret, strerror(-ret));
+          goto release_tx3;
+      }
+      printf("#Transaction tx3: collection remove successfully\n");
+
       ret = os_queue_transaction(os, coll3, tx3);
       if (ret < 0) {
         fprintf(stderr, "os_queue_transaction failed for tx3: %d (%s)\n", ret, strerror(-ret));

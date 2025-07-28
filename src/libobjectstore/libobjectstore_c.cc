@@ -274,6 +274,19 @@ extern "C" int os_transaction_collection_create(transaction_t tx,
   return 0;
 }
 
+extern "C" int os_transaction_collection_remove(transaction_t tx, cid_t cid_)
+{
+  C_Transaction* ct = static_cast<C_Transaction*>(tx);
+  if (!ct || !ct->tx) {
+    return -EINVAL;
+  }
+
+  coll_t cid = get_coll_t(cid_);
+  ct->tx->remove_collection(cid);
+
+  return 0;
+}
+
 extern "C" int os_transaction_object_write(transaction_t tx, cid_t cid_,
   const char *oid, const char *data, uint64_t offset, uint64_t len,
   uint32_t flags)

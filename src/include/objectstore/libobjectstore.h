@@ -195,6 +195,15 @@ void os_release_collection(collection_t coll);
 int os_transaction_collection_create(transaction_t tx, collection_t c);
 
 /**
+ * Remove the collection, the collection must be empty.
+ *
+ * @param tx transaction within which the collection op will be executed
+ * @param cid id/name of the collection to be removed
+ * @returns 0 on success, negative error code on failure
+ */
+int os_transaction_collection_remove(transaction_t tx, cid_t cid);
+
+/**
  * Add an object write operation to the specified transaction.
  *
  * If the object is too small, it is expanded as needed. It is possible to
