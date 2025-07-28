@@ -304,6 +304,22 @@ extern "C" int os_transaction_object_zero(transaction_t tx, cid_t cid_,
   return 0;
 }
 
+extern "C" int os_transaction_object_remove(transaction_t tx, cid_t cid_,
+  const char *oid)
+{
+  C_Transaction* ct = static_cast<C_Transaction*>(tx);
+  if (!ct || !ct->tx || !oid) {
+    return -EINVAL;
+  }
+
+  coll_t cid = get_coll_t(cid_);
+  ghobject_t hoid(hobject_t(oid, "", CEPH_NOSNAP, 0, cid.pool(), ""));
+
+  ct->tx->remove(cid, hoid);
+
+  return 0;
+}
+
 extern "C" int os_queue_transaction(object_store_t os_, collection_t coll,
   transaction_t tx)
 {

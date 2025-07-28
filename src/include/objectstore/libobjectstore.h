@@ -232,6 +232,19 @@ int os_transaction_object_zero(transaction_t tx, cid_t cid, const char *oid,
   uint64_t off, uint64_t len);
 
 /**
+ * Remove an object. All four parts of the object are removed.
+ *
+ * @param tx transaction to which the write operation will be added
+ * @param cid id/name of the collection
+ * @param oid object name within the collection
+ * @param offset offset within the object where the write operation will begin
+ * @param len length of buffer
+ * @param data bytes to be written
+ * @returns 0 on success, negative error code on failure
+ */
+int os_transaction_object_remove(transaction_t tx, cid_t cid, const char *oid);
+
+/**
  * Submit a transaction for execution.
  *
  * This function queues the transaction to the ObjectStore for asynchronous
