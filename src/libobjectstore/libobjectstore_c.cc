@@ -177,6 +177,31 @@ extern "C" void os_release_collection(collection_t coll)
   delete cc;
 }
 
+extern "C" collection_t os_open_collection(object_store_t os_, cid_t cid_)
+{
+  ObjectStore* os = static_cast<ObjectStore*>(os_);
+  if (!os) {
+    std::cerr << "os is null" << std::endl;
+    return nullptr;
+  }
+
+  coll_t cid = get_coll_t(cid_);
+  ObjectStore::CollectionHandle ch = os->open_collection(cid);
+  if (!ch) {
+    std::cerr << "os_open_collection failed" << std::endl;
+    return nullptr;
+  }
+
+  C_Collection *cc = new C_Collection;
+  if (!cc) {
+    return nullptr;
+  }
+
+  cc->ch = ch;
+
+  return static_cast<collection_t>(cc);
+}
+
 extern "C" int os_object_read(object_store_t os_, collection_t coll,
   const char *oid, uint64_t offset, uint64_t len, char *buf, uint32_t flags)
 {

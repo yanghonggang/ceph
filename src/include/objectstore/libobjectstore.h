@@ -131,10 +131,9 @@ int os_umount(object_store_t os);
  *
  * @param os ObjectStore handle
  * @param cid id/name of the collection
- * @param c where to store the collection handle
- * @returns 0 on success, negative error code on failure
+ * @return non-NULL on success, NULL on memory allocation error
  */
-int os_open_collection(object_store_t os, cid_t cid, collection_t *c);
+collection_t os_open_collection(object_store_t os, cid_t cid);
 
 /**
  * Create and initialize a new transaction object.

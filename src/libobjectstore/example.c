@@ -95,60 +95,69 @@ int main() {
 release_tx:
       os_release_transaction(tx);
       printf("#Transaction destroyed successfully: %p\n", (void*)tx);
-
-      {
-        transaction_t tx2 = os_create_transaction();
-        if (!tx2) {
-          fprintf(stderr, "os_transaction_create failed for tx2\n");
-          goto release_coll;
-        }
-        printf("#Transaction tx2 created successfully: %p\n", (void*)tx2);
-
-        const char* oid = "mytestobj";
-        cid_t cid = 12345;
-
-        int ret = os_transaction_object_zero(tx2, cid, oid, 2, 4);
-        if (ret < 0) {
-          fprintf(stderr, "os_transaction_object_zero failed in tx2: %d (%s)\n", ret, strerror(-ret));
-          goto release_tx2;
-        }
-        printf("#Transaction tx2: object zero successfully\n");
-
-        ret = os_queue_transaction(os, coll, tx2);
-        if (ret < 0) {
-          fprintf(stderr, "os_queue_transaction failed for tx2: %d (%s)\n", ret, strerror(-ret));
-          goto release_tx2;
-        }
-        printf("#Transaction tx2 queued successfully\n");
-
-        char read_buffer[1024];
-        memset(read_buffer, 0, sizeof(read_buffer));
-        ret = os_object_read(os, coll, oid, 0, sizeof(read_buffer), read_buffer, 0);
-        if (ret < 0) {
-          fprintf(stderr, "os_object_read failed: %d (%s)\n", ret, strerror(-ret));
-          goto release_tx2;
-        }
-        printf("#Object read successfully (raw): '");
-        for (int i = 0; i < strlen("mytestobj"); i++) {
-          if (read_buffer[i] == '\0') {
-            printf("\\0");
-          } else {
-            printf("%c", read_buffer[i]);
-          }
-        }
-        printf("'\n");
-
-        printf("#Object read as string: '%s'\n", read_buffer);
-
-release_tx2:
-        os_release_transaction(tx2);
-        printf("#Transaction tx2 destroyed successfully: %p\n", (void*)tx2);
-    }
-
 release_coll:
       os_release_collection(coll);
       printf("#Collection released successfully: %p\n", (void*)coll);
     }
+
+    {
+      cid_t cid = 12345;
+      collection_t coll2 = os_open_collection(os, cid);
+      if (!coll2) {
+        fprintf(stderr, "os_open_collection failed\n");
+        goto umount;
+      }
+      printf("#Open collection successfully: %p\n", (void*)coll2);
+
+      transaction_t tx2 = os_create_transaction();
+      if (!tx2) {
+        fprintf(stderr, "os_transaction_create failed for tx2\n");
+        goto release_coll2;
+      }
+      printf("#Transaction tx2 created successfully: %p\n", (void*)tx2);
+
+      const char* oid = "mytestobj";
+      int ret = os_transaction_object_zero(tx2, cid, oid, 2, 4);
+      if (ret < 0) {
+        fprintf(stderr, "os_transaction_object_zero failed in tx2: %d (%s)\n", ret, strerror(-ret));
+        goto release_tx2;
+      }
+      printf("#Transaction tx2: object zero successfully\n");
+
+      ret = os_queue_transaction(os, coll2, tx2);
+      if (ret < 0) {
+        fprintf(stderr, "os_queue_transaction failed for tx2: %d (%s)\n", ret, strerror(-ret));
+        goto release_tx2;
+      }
+      printf("#Transaction tx2 queued successfully\n");
+
+      char read_buffer[1024];
+      memset(read_buffer, 0, sizeof(read_buffer));
+      ret = os_object_read(os, coll2, oid, 0, sizeof(read_buffer), read_buffer, 0);
+      if (ret < 0) {
+        fprintf(stderr, "os_object_read failed: %d (%s)\n", ret, strerror(-ret));
+        goto release_tx2;
+      }
+      printf("#Object read successfully (raw): '");
+      for (int i = 0; i < strlen("mytestobj"); i++) {
+        if (read_buffer[i] == '\0') {
+          printf("\\0");
+        } else {
+          printf("%c", read_buffer[i]);
+        }
+      }
+      printf("'\n");
+
+      printf("#Object read as string: '%s'\n", read_buffer);
+
+release_tx2:
+      os_release_transaction(tx2);
+      printf("#Transaction tx2 destroyed successfully: %p\n", (void*)tx2);
+
+release_coll2:
+      os_release_collection(coll2);
+      printf("#Collection released successfully: %p\n", (void*)coll2);
+  }
 
 umount:
     ret = os_umount(os);
