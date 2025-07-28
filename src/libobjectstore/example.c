@@ -83,6 +83,15 @@ int main() {
       }
       printf("#Transaction queued successfully\n");
 
+      char read_buffer[1024];
+      memset(read_buffer, 0, sizeof(read_buffer));
+      ret = os_object_read(os, coll, oid, offset, len, read_buffer, flags);
+      if (ret < 0) {
+        fprintf(stderr, "os_object_read failed: %d (%s)\n", ret, strerror(-ret));
+        goto release_tx;
+      }
+      printf("#Object read successfully: %s\n", read_buffer);
+
 release_tx:
       os_release_transaction(tx);
       printf("#Transaction destroyed successfully: %p\n", (void*)tx);
