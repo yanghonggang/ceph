@@ -213,6 +213,26 @@ int os_transaction_object_write(transaction_t tx, cid_t cid, const char *oid,
                                  uint64_t len, uint32_t flags);
 
 /**
+ * Zero out the indicated byte range within an object.
+ *
+ * ObjectStore instances may optimize this to release the underlying storage
+ * space. If the zero range extends beyond the end of the object, the object
+ * size is extended, just as if we were writing a buffer full of zeros.
+ * EXCEPT if the length is 0, in which case (just like a 0-length write)
+ * we do not adjust the object size.
+ *
+ * @param tx transaction to which the write operation will be added
+ * @param cid id/name of the collection
+ * @param oid object name within the collection
+ * @param offset offset within the object where the write operation will begin
+ * @param len length of buffer
+ * @param data bytes to be written
+ * @returns 0 on success, negative error code on failure
+ */
+int os_transaction_object_zero(transaction_t tx, cid_t cid, const char *oid,
+  uint64_t off, uint64_t len);
+
+/**
  * Submit a transaction for execution.
  *
  * This function queues the transaction to the ObjectStore for asynchronous
