@@ -64,6 +64,18 @@ int main() {
       }
       printf("#Transaction: create collection successfully\n");
 
+      const char* oid = "mytestobj";
+      const char* data = oid;
+      uint64_t offset = 0;
+      uint64_t len = strlen(oid);
+      uint32_t flags = 0;
+      ret = os_transaction_object_write(tx, cid, oid, data, offset, len, flags);
+      if (ret < 0) {
+        fprintf(stderr, "os_transaction_object_write failed: %d (%s)\n", ret, strerror(-ret));
+        goto release_tx;
+      }
+      printf("#Transaction: object write successfully\n");
+
       ret = os_queue_transaction(os, coll, tx);
       if (ret < 0) {
         fprintf(stderr, "os_queue_transaction failed: %d (%s)\n", ret, strerror(-ret));
