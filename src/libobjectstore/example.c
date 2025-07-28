@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <inttypes.h>
 
 #include "objectstore/libobjectstore.h"
 
@@ -57,9 +58,9 @@ int main() {
       }
       printf("#Transaction created successfully: %p\n", (void*)tx);
 
-      ret = os_transaction_create_collection(tx, coll);
+      ret = os_transaction_collection_create(tx, coll);
       if (ret < 0) {
-        fprintf(stderr, "os_transaction_create_collection failed: %d (%s)\n", ret, strerror(-ret));
+        fprintf(stderr, "os_transaction_collection_create failed: %d (%s)\n", ret, strerror(-ret));
         goto release_tx;
       }
       printf("#Transaction: create collection successfully\n");
@@ -102,6 +103,43 @@ release_coll:
 
     {
       cid_t cid = 12345;
+      {
+        cid_t target_cid = cid;
+        cid_t start = LIBOS_CID_INVALID;
+        cid_t next;
+        cid_t found_cids[10];
+        int found = 0;
+
+        printf("#Checking if collection with cid=%" PRIu64 " exists using os_collection_list...\n", target_cid);
+
+        while (1) {
+          int ret = os_collection_list(os, start, found_cids, 10, &next);
+          if (ret < 0) {
+            fprintf(stderr, "os_collection_list failed: %d (%s)\n", ret, strerror(-ret));
+            break;
+          }
+
+          for (int i = 0; i < ret; i++) {
+            if (found_cids[i] == target_cid) {
+              found = 1;
+              printf("#Found collection with cid=%" PRIu64 " in the list.\n", target_cid);
+              break;
+            }
+          }
+
+          if (found || next == LIBOS_CID_INVALID) {
+            break;
+          }
+
+          start = next;
+        }
+
+        if (!found) {
+          fprintf(stderr, "Collection with cid=%" PRIu64 " does not exist according to os_collection_list.\n", target_cid);
+        } else {
+          printf("#Confirmed: collection cid=%" PRIu64 " exists.\n", target_cid);
+        }
+      }
       collection_t coll2 = os_open_collection(os, cid);
       if (!coll2) {
         fprintf(stderr, "os_open_collection failed\n");

@@ -54,6 +54,12 @@ typedef void *collection_t;
 typedef uint64_t cid_t;
 
 /**
+ * Represents an invalid, used as a starting point for listing collections or
+ * indicating no valid collection ID is available.
+ */
+#define LIBOS_CID_INVALID ((cid_t)(-1))
+
+/**
  * A Transaction represents a sequence of primitive mutation
  * operations.
  */
@@ -174,8 +180,8 @@ collection_t os_create_new_collection(object_store_t os, cid_t cid);
  * Release a collection.
  *
  * @param coll_ A pointer to the collection previously obtained from
- *              `os_create_new_collection`. Passing NULL is allowed and results
- *              in no operation.
+ *  `os_create_new_collection`. Passing NULL is allowed and results in no
+ *  operation.
  */
 void os_release_collection(collection_t coll);
 
@@ -186,7 +192,7 @@ void os_release_collection(collection_t coll);
  * @param c collection handle returned by os_create_new_collection()
  * @returns 0 on success, negative error code on failure
  */
-int os_transaction_create_collection(transaction_t tx, collection_t c);
+int os_transaction_collection_create(transaction_t tx, collection_t c);
 
 /**
  * Add an object write operation to the specified transaction.
@@ -258,9 +264,25 @@ int os_transaction_object_remove(transaction_t tx, cid_t cid, const char *oid);
  */
 int os_queue_transaction(object_store_t os, collection_t c, transaction_t tx);
 
-// FIXME: just for test
-int os_collection_list(object_store_t os, collection_t c, const char **ls,
-                       int cnt);
+/**
+ * List collections from the object store with pagination support.
+ *
+ * Note: If the start collection is not found or beyond the last collection,
+ * this function returns 0, indicating no collections were found.
+ *
+ * @param os ObjectStore handle
+ * @param start collection ID to start listing from; LIBOS_CID_INVALID means
+ *  start from beginning
+ * @param cids Buffer to store collection IDs (must be pre-allocated by
+ *  caller)
+ * @param cnt maximum number of collection IDs that can be stored in cids
+ * @param next pointer to receive the next collection ID for pagination;
+ *  LIBOS_CID_INVALID indicates no more collections.
+ * @returns Number of collections written to cids (>= 0) on success,
+ *  negative error code on failure.
+ */
+int os_collection_list(object_store_t os, cid_t start, cid_t *cids, int cnt,
+  cid_t *next);
 
 /**
  * Read a byte range of data from an object.

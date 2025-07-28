@@ -31,6 +31,11 @@ static CephContext *create_cct(const char * const clustername,
   return cct;
 }
 
+static inline cid_t get_cid_t(const coll_t& coll)
+{
+  return coll.pool();
+}
+
 extern "C" config_ctx_t config_ctx_create()
 {
   CephInitParameters iparams(CEPH_ENTITY_TYPE_CLIENT);
@@ -254,7 +259,7 @@ extern "C" void os_release_transaction(transaction_t tx_)
   delete ct;
 }
 
-extern "C" int os_transaction_create_collection(transaction_t tx,
+extern "C" int os_transaction_collection_create(transaction_t tx,
   collection_t coll)
 {
   C_Transaction* ct = static_cast<C_Transaction*>(tx);
@@ -335,3 +340,52 @@ extern "C" int os_queue_transaction(object_store_t os_, collection_t coll,
   return 0;
 }
 
+extern "C" int os_collection_list(object_store_t os_, cid_t start, cid_t *cids,
+  int cnt, cid_t *next)
+{
+  if (!os_ || !cids || !next || cnt < 0) {
+    if (next) *next = LIBOS_CID_INVALID;
+    return -EINVAL;
+  }
+
+  ObjectStore* os = static_cast<ObjectStore*>(os_);
+  std::vector<coll_t> ls;
+
+  int r = os->list_collections(ls);
+  if (r < 0) {
+    *next = LIBOS_CID_INVALID;
+    return r;
+  }
+
+  if (ls.empty()) {
+    *next = LIBOS_CID_INVALID;
+    return 0;
+  }
+
+  std::vector<coll_t>::const_iterator it;
+  if (start == LIBOS_CID_INVALID) {
+    it = ls.begin();
+  } else {
+    coll_t start_coll = get_coll_t(start);
+    it = std::lower_bound(ls.begin(), ls.end(), start_coll);
+    if (it == ls.end()) {
+      *next = LIBOS_CID_INVALID;
+      return 0;
+    }
+  }
+
+  int filled = 0;
+  while (it != ls.end() && filled < cnt) {
+    cids[filled] = get_cid_t(*it);
+    ++filled;
+    ++it;
+  }
+
+  if (it != ls.end()) {
+    *next = get_cid_t(*it);
+  } else {
+    *next = LIBOS_CID_INVALID;
+  }
+
+  return filled;
+}
