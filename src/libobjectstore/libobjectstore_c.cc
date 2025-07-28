@@ -177,6 +177,37 @@ extern "C" void os_release_collection(collection_t coll)
   delete cc;
 }
 
+extern "C" int os_object_read(object_store_t os_, collection_t coll,
+  const char *oid, uint64_t offset, uint64_t len, char *buf, uint32_t flags)
+{
+  C_Collection *cc = static_cast<C_Collection*>(coll);
+  ObjectStore* os = static_cast<ObjectStore*>(os_);
+  if (!os || !cc || !cc->ch || !buf) {
+    std::cerr << "os or c/ch or buf is null" << std::endl;
+    return -EINVAL;
+  }
+
+  bufferlist bl;
+  bufferptr bp = buffer::create_static(len, buf);
+  bl.push_back(bp);
+
+  coll_t cid = cc->ch->cid;
+  ghobject_t hoid(hobject_t(oid, "", CEPH_NOSNAP, 0, cid.pool(), ""));
+  int ret = os->read(cc->ch, hoid, offset, len, bl);
+  if (ret >= 0) {
+    if (bl.length() > len) {
+      return -ERANGE;
+    }
+    if (!bl.is_provided_buffer(buf)) {
+      bl.begin().copy(bl.length(), buf);
+    }
+
+    ret = bl.length();
+  }
+
+  return ret;
+}
+
 struct C_Transaction {
   std::unique_ptr<ObjectStore::Transaction> tx;
 };
