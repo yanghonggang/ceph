@@ -338,6 +338,26 @@ extern "C" int os_transaction_object_remove(transaction_t tx, cid_t cid_,
   return 0;
 }
 
+extern "C" int os_transaction_object_rename(transaction_t tx, cid_t cid_,
+  const char *oldoid, const char *oid)
+{
+  C_Transaction* ct = static_cast<C_Transaction*>(tx);
+  if (!ct || !ct->tx || !oid || !oldoid || cid_ == LIBOS_CID_INVALID) {
+    return -EINVAL;
+  }
+
+  coll_t cid = get_coll_t(cid_);
+  auto pool = cid.pool();
+  ghobject_t hoid_old(hobject_t(oldoid, "", CEPH_NOSNAP, 0, pool, ""));
+  ghobject_t hoid(hobject_t(oid, "", CEPH_NOSNAP, 0, pool, ""));
+
+  std::cout << "rename from " << hoid_old << " to " << hoid << std::endl;
+
+  ct->tx->collection_move_rename(cid, hoid_old, cid, hoid);
+
+  return 0;
+}
+
 extern "C" int os_queue_transaction(object_store_t os_, collection_t coll,
   transaction_t tx)
 {

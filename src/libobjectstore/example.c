@@ -1,8 +1,68 @@
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
+#include <stdlib.h>
 
 #include "objectstore/libobjectstore.h"
+
+void test_rename(object_store_t os, config_ctx_t ctx)
+{
+  const char* oldoid = "mytestobj";
+  const char* oid = "yourobject";
+
+  cid_t cid = 12345;
+  collection_t coll = os_open_collection(os, cid);
+  if (!coll) {
+    fprintf(stderr, "os_open_collection failed\n");
+  }
+  printf("#Open collection successfully: %p\n", (void*)coll);
+
+  transaction_t tx = os_create_transaction();
+  if (!tx) {
+    fprintf(stderr, "os_transaction_create failed for tx\n");
+    goto release_coll;
+  }
+  printf("#Transaction tx created successfully: %p\n", (void*)tx);
+
+  char read_buffer[1024];
+  memset(read_buffer, 0, sizeof(read_buffer));
+  int ret = os_object_read(os, coll, oldoid, 0, sizeof(read_buffer), read_buffer, 0);
+  if (ret < 0) {
+    fprintf(stderr, "[rename test before rename] os_object_read failed: %d (%s)\n", ret, strerror(-ret));
+  } else {
+    printf("[rename test before rename] read data: %s\n", read_buffer);
+  }
+
+  ret = os_transaction_object_rename(tx, cid, oldoid, oid);
+  if (ret < 0) {
+    fprintf(stderr, "os_transaction_object_rename failed in tx: %d (%s)\n", ret, strerror(-ret));
+    goto release_tx;
+  }
+  printf("#Transaction tx: object rename successfully\n");
+
+  ret = os_queue_transaction(os, coll, tx);
+  if (ret < 0) {
+    fprintf(stderr, "os_queue_transaction failed: %d (%s)\n", ret, strerror(-ret));
+    goto release_tx;
+  }
+  printf("#Transaction queued successfully\n");
+
+  memset(read_buffer, 0, sizeof(read_buffer));
+  ret = os_object_read(os, coll, oid, 0, sizeof(read_buffer), read_buffer, 0);
+  if (ret < 0) {
+    fprintf(stderr, "[rename test after rename] os_object_read failed: %d (%s)\n", ret, strerror(-ret));
+  } else {
+    printf("[rename test after rename] read data: %s\n", read_buffer);
+  }
+
+release_tx:
+  os_release_transaction(tx);
+  printf("#Transaction tx destroyed successfully: %p\n", (void*)tx);
+
+release_coll:
+  os_release_collection(coll);
+  printf("#Collection released successfully: %p\n", (void*)coll);
+}
 
 int main() {
   printf("Creating config context...\n");
@@ -197,6 +257,8 @@ release_coll2:
       printf("#Collection released successfully: %p\n", (void*)coll2);
   }
 
+  test_rename(os, ctx);
+
   {
       cid_t cid = 12345;
       collection_t coll3 = os_open_collection(os, cid);
@@ -213,7 +275,7 @@ release_coll2:
       }
       printf("#Transaction tx3 created successfully: %p\n", (void*)tx3);
 
-      const char* oid = "mytestobj";
+      const char* oid = "yourobject";
       int ret = os_transaction_object_remove(tx3, cid, oid);
       if (ret < 0) {
         fprintf(stderr, "os_transaction_object_zero failed in tx3: %d (%s)\n", ret, strerror(-ret));
@@ -283,3 +345,4 @@ cleanup:
 
   return ret;
 }
+

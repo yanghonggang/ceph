@@ -260,6 +260,18 @@ int os_transaction_object_zero(transaction_t tx, cid_t cid, const char *oid,
 int os_transaction_object_remove(transaction_t tx, cid_t cid, const char *oid);
 
 /**
+ * Rename an object.
+ *
+ * @param tx transaction to which the write operation will be added
+ * @param cid id/name of the collection
+ * @param oldoid object current name
+ * @param oid object new name
+ * @returns 0 on success, negative error code on failure
+ */
+int os_transaction_object_rename(transaction_t tx, cid_t cid,
+  const char *oldoid, const char *oid);
+
+/**
  * Submit a transaction for execution.
  *
  * This function queues the transaction to the ObjectStore for asynchronous
