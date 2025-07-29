@@ -296,13 +296,13 @@ int os_queue_transaction(object_store_t os, collection_t c, transaction_t tx);
  *  start from beginning
  * @param cids Buffer to store collection IDs (must be pre-allocated by
  *  caller)
- * @param cnt maximum number of collection IDs that can be stored in cids
+ * @param max maximum number of collection IDs that can be stored in cids
  * @param next pointer to receive the next collection ID for pagination;
  *  LIBOS_CID_INVALID indicates no more collections.
  * @returns Number of collections written to cids (>= 0) on success,
  *  negative error code on failure.
  */
-int os_collection_list(object_store_t os, cid_t start, cid_t *cids, int cnt,
+int os_collection_list(object_store_t os, cid_t start, cid_t *cids, int max,
   cid_t *next);
 
 /**
@@ -323,6 +323,43 @@ int os_collection_list(object_store_t os, cid_t start, cid_t *cids, int cnt,
  */
 int os_object_read(object_store_t os, collection_t c, const char *oid,
                    uint64_t offset, uint64_t len, char *buf, uint32_t flags);
+
+/**
+ * Lists contents of a collection that fall within the range [start, end) and
+ * returns no more than a specified number of results. This function writes all
+ * keys into a single, contiguous buffer (buf), separated by '\0' characters.
+ *
+ * @note "next_len == 1 && next[0] = '\0'" indicates that the listing has
+ *  reached the end, no more items are available.
+ *
+ * @param os ObjectStore handle
+ * @param c collection handle containing the objects
+ * @param start the starting key for listing objects; list object that sort >=
+ *  this value. If start is NULL, listing begins from the very first object in
+ *  the collection.
+ * @param end the ending key for listing objects; list objects that sort < this
+ *  value. If end is NULL, listing continues to the very last object in the
+ *  collection (unbounded end).
+ * @param max The maximum number of results to return
+ * @param buf a pointer to a buffer where the keys will be written, separated by
+ *  '\0'. If buf is NULL, the function calculates the required size for buf and
+ *  returns -ENOSPC.
+ * @param buf_len a pointer to the size of the buf on input, and the amount of
+ *  buf used on output. If buf is too small, buf_len will contain the required
+ *  size.
+ * @param count a pointer to an integer where the actual number of items written
+ *  to buf will be stored. If buf is NULL, count will not be modified.
+ * @param next a pointer to a buffer where the next key after the last returned
+ *  key will be stored. This can be used in subsequent calls to retrieve the
+ *  next set of items.
+ * @param next_len a pointer to the size of the next buffer on input, and the
+ *  amount of next buffer used on output. If next is too small to hold the next
+ *  key, next_len will contain the required size.
+ * @returns 0 on success, negative error code on failure
+  */
+int os_object_list(object_store_t os, collection_t c, const char* start,
+  const char* end, int max, char* buf, uint64_t* buf_len, int* count,
+  char* next, uint64_t* next_len);
 
 #ifdef __cplusplus
 }

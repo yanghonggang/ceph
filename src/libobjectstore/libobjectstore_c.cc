@@ -207,6 +207,11 @@ extern "C" collection_t os_open_collection(object_store_t os_, cid_t cid_)
   return static_cast<collection_t>(cc);
 }
 
+static inline ghobject_t get_ghobject_t(const char *oid, uint64_t pool)
+{
+  return ghobject_t(hobject_t(oid, "", CEPH_NOSNAP, 0, pool, ""));
+}
+
 extern "C" int os_object_read(object_store_t os_, collection_t coll,
   const char *oid, uint64_t offset, uint64_t len, char *buf, uint32_t flags)
 {
@@ -222,7 +227,8 @@ extern "C" int os_object_read(object_store_t os_, collection_t coll,
   bl.push_back(bp);
 
   coll_t cid = cc->ch->cid;
-  ghobject_t hoid(hobject_t(oid, "", CEPH_NOSNAP, 0, cid.pool(), ""));
+  // ghobject_t hoid(hobject_t(oid, "", CEPH_NOSNAP, 0, cid.pool(), ""));
+  auto hoid = get_ghobject_t(oid, cid.pool());
   int ret = os->read(cc->ch, hoid, offset, len, bl);
   if (ret >= 0) {
     if (bl.length() > len) {
@@ -297,7 +303,8 @@ extern "C" int os_transaction_object_write(transaction_t tx, cid_t cid_,
   }
 
   coll_t cid = get_coll_t(cid_);
-  ghobject_t hoid(hobject_t(oid, "", CEPH_NOSNAP, 0, cid.pool(), ""));
+  // ghobject_t hoid(hobject_t(oid, "", CEPH_NOSNAP, 0, cid.pool(), ""));
+  auto hoid = get_ghobject_t(oid, cid.pool());
   bufferlist bl;
   bl.append(data);
 
@@ -315,7 +322,8 @@ extern "C" int os_transaction_object_zero(transaction_t tx, cid_t cid_,
   }
 
   coll_t cid = get_coll_t(cid_);
-  ghobject_t hoid(hobject_t(oid, "", CEPH_NOSNAP, 0, cid.pool(), ""));
+  // ghobject_t hoid(hobject_t(oid, "", CEPH_NOSNAP, 0, cid.pool(), ""));
+  auto hoid = get_ghobject_t(oid, cid.pool());
 
   ct->tx->zero(cid, hoid, off, len);
 
@@ -331,7 +339,8 @@ extern "C" int os_transaction_object_remove(transaction_t tx, cid_t cid_,
   }
 
   coll_t cid = get_coll_t(cid_);
-  ghobject_t hoid(hobject_t(oid, "", CEPH_NOSNAP, 0, cid.pool(), ""));
+  // ghobject_t hoid(hobject_t(oid, "", CEPH_NOSNAP, 0, cid.pool(), ""));
+  auto hoid = get_ghobject_t(oid, cid.pool());
 
   ct->tx->remove(cid, hoid);
 
@@ -348,8 +357,11 @@ extern "C" int os_transaction_object_rename(transaction_t tx, cid_t cid_,
 
   coll_t cid = get_coll_t(cid_);
   auto pool = cid.pool();
-  ghobject_t hoid_old(hobject_t(oldoid, "", CEPH_NOSNAP, 0, pool, ""));
-  ghobject_t hoid(hobject_t(oid, "", CEPH_NOSNAP, 0, pool, ""));
+  // ghobject_t hoid_old(hobject_t(oldoid, "", CEPH_NOSNAP, 0, pool, ""));
+  // ghobject_t hoid(hobject_t(oid, "", CEPH_NOSNAP, 0, pool, ""));
+
+  auto hoid_old = get_ghobject_t(oldoid, pool);
+  auto hoid = get_ghobject_t(oid, pool);
 
   std::cout << "rename from " << hoid_old << " to " << hoid << std::endl;
 
@@ -421,4 +433,79 @@ extern "C" int os_collection_list(object_store_t os_, cid_t start, cid_t *cids,
   }
 
   return filled;
+}
+
+extern "C" int os_object_list(object_store_t os_, collection_t c,
+  const char* start, const char* end, int max, char* buf, uint64_t* buf_len,
+  int* count, char* next, uint64_t* next_len)
+{
+  C_Collection *cc = static_cast<C_Collection*>(c);
+  ObjectStore* os = static_cast<ObjectStore*>(os_);
+
+  if (!os || !cc || !cc->ch || !buf_len || !count || !next || !next_len) {
+    return -EINVAL;
+  }
+
+  *count = 0;
+  if (buf) {
+    buf[0] = '\0';
+  }
+  next[0] = '\0';
+
+  coll_t cid = cc->ch->cid;
+  auto pool = cid.pool();
+
+  auto start_oid = start ? get_ghobject_t(start, pool) : ghobject_t();
+  auto end_oid = end ? get_ghobject_t(end, pool) : ghobject_t::get_max();
+
+  std::vector<ghobject_t> ls;
+  ghobject_t next_ghobj;
+  int ret = os->collection_list(cc->ch, start_oid, end_oid, max, &ls,
+    &next_ghobj);
+  if (ret < 0) {
+    return ret;
+  }
+
+  // FIXME: 优化掉这次复制
+  size_t needed = 0;
+  std::vector<std::string> keys;
+  for (auto& obj : ls) {
+      std::string key = obj.hobj.get_effective_key();
+      std::cout << __func__ << " obj=" << obj << " | hobj=" << obj.hobj << "| key=" << key << std::endl;
+      keys.push_back(key);
+      needed += key.size() + 1; // +1 for '\0'
+  }
+  *count = keys.size();
+
+  if (buf && *buf_len < needed) {
+      *buf_len = needed;
+      return -ENOSPC;
+  }
+
+  if (buf && *buf_len >= needed) {
+      char* p = buf;
+      for (auto& key : keys) {
+          strcpy(p, key.c_str());
+          p += key.size() + 1;
+      }
+      *buf_len = needed;
+  } else {
+      *buf_len = needed;
+  }
+
+  if (!next_ghobj.is_max()) {
+      std::string next_str = next_ghobj.hobj.get_key();
+      if (next_str.size() + 1 <= *next_len) {
+          strcpy(next, next_str.c_str());
+          *next_len = next_str.size() + 1;
+      } else {
+          *next_len = next_str.size() + 1;
+          return -ENOSPC;
+      }
+  } else {
+      *next_len = 1;
+      next[0] = '\0';
+  }
+
+  return 0;
 }

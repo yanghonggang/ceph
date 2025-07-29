@@ -5,6 +5,40 @@
 
 #include "objectstore/libobjectstore.h"
 
+void test_object_list(object_store_t os, collection_t coll) {
+    char buf[1024];
+    uint64_t buf_len = sizeof(buf);
+    int count;
+    char next[256];
+    uint64_t next_len = sizeof(next);
+
+    const char* start = NULL;
+    const char* end = NULL;
+
+    while (1) {
+        int ret = os_object_list(os, coll, start, end, 10, buf, &buf_len,
+          &count, next, &next_len);
+        if (ret < 0) {
+            fprintf(stderr, "os_object_list failed: %d (%s)\n", ret, strerror(-ret));
+            break;
+        }
+
+        char* p = buf;
+        for (int i = 0; i < count; ++i) {
+            printf("Object: %s\n", p);
+            p += strlen(p) + 1;
+        }
+
+        if (next_len == 1 && next[0] == '\0') {
+            break;
+        } else {
+            start = next;
+            buf_len = sizeof(buf);
+            next_len = sizeof(next);
+        }
+    }
+}
+
 void test_rename(object_store_t os, config_ctx_t ctx)
 {
   const char* oldoid = "mytestobj";
@@ -16,6 +50,8 @@ void test_rename(object_store_t os, config_ctx_t ctx)
     fprintf(stderr, "os_open_collection failed\n");
   }
   printf("#Open collection successfully: %p\n", (void*)coll);
+
+  test_object_list(os, coll);
 
   transaction_t tx = os_create_transaction();
   if (!tx) {
