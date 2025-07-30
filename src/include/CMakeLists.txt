@@ -44,3 +44,9 @@ if(WITH_LIBCEPHFS)
     cephfs/types.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cephfs)
 endif()
+
+if(WITH_LIBOBJECTSTORE)
+  install(FILES
+    objectstore/libobjectstore.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/objectstore)
+endif()

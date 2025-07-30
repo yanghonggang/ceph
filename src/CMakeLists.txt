@@ -724,7 +724,6 @@ add_subdirectory(include)
 add_subdirectory(librados)
 add_subdirectory(neorados)
 
-option(WITH_LIBOBJECTSTORE "libobjectstore library" ON)
 if(WITH_LIBOBJECTSTORE)
   add_subdirectory(libobjectstore)
 endif()

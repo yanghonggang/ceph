@@ -836,6 +836,8 @@ add_custom_target(check
 
 option(WITH_SYSTEMD "build with systemd support" ON)
 
+option(WITH_LIBOBJECTSTORE "libobjectstore library" ON)
+
 add_subdirectory(src)
 
 add_subdirectory(qa)
