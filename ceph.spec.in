@@ -144,6 +144,7 @@
 %global _find_debuginfo_dwz_opts %{nil}
 %endif
 %bcond_with sccache
+%bcond_without libobjectstore
 
 %{!?_udevrulesdir: %global _udevrulesdir /lib/udev/rules.d}
 %{!?tmpfiles_create: %global tmpfiles_create systemd-tmpfiles --create}
@@ -992,6 +993,32 @@ This package contains a tool to deploy OSD with different devices like
 lvm or physical disks, and trying to follow a predictable, and robust
 way of preparing, activating, and starting the deployed OSD.
 
+%if 0%{with libobjectstore}
+%package -n libobjectstore
+Summary:	Local ObjectStore engine library
+%if 0%{?suse_version}
+Group:		System/Libraries
+%endif
+%description -n libobjectstore
+Local ObjectStore engine library. This library exports the storage backend
+engine used by OSD daemons as an independent, embeddable library. It provides
+a high-performance, user-space, single-node storage engine designed to manage
+raw block devices directly. The library exposes a stable C API, enabling
+developers to efficiently manage raw disks or partitions and build custom,
+higher-level storage services on top of a proven and robust storage foundation.
+
+%package -n libobjectstore-devel
+Summary:	Local ObjectStore engine library headers
+%if 0%{?suse_version}
+Group:		Development/Libraries/C and C++
+%endif
+Provides:	libobjectstore-devel = %{_epoch_prefix}%{version}-%{release}
+Requires:	libobjectstore = %{_epoch_prefix}%{version}-%{release}
+%description -n libobjectstore-devel
+This package contains C libraries and headers needed to develop programs
+that use Ceph local ObjectStore engine library.
+%endif
+
 %package -n librados2
 Summary:	RADOS distributed object store client library
 %if 0%{?suse_version}
@@ -1554,6 +1581,9 @@ cmake .. \
     -DWITH_GRAFANA:BOOL=ON \
 %if %{with sccache}
     -DWITH_SCCACHE=ON \
+%endif
+%if 0%{without libobjectstore}
+    -DWITH_LIBOBJECTSTORE:BOOL=OFF \
 %endif
 %if 0%{with cephadm_bundling}
 %if 0%{with cephadm_pip_deps}
@@ -2422,6 +2452,22 @@ fi
 %dir %{_prefix}/lib/ocf/resource.d/ceph
 %attr(0755,-,-) %{_prefix}/lib/ocf/resource.d/ceph/rbd
 
+%endif
+
+%if 0%{with libobjectstore}
+%files -n libobjectstore-devel
+%dir %{_includedir}/objectstore
+%{_includedir}/objectstore/libobjectstore.h
+%{_libdir}/libobjectstore.so
+
+%files -n libobjectstore
+%{_libdir}/libobjectstore.so.*
+%dir %{_libdir}/ceph
+%dir %{_sysconfdir}/ceph
+
+%post -n libobjectstore -p /sbin/ldconfig
+
+%postun -n libobjectstore -p /sbin/ldconfig
 %endif
 
 %files -n librados2
