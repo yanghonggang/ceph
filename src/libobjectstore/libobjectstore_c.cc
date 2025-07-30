@@ -447,9 +447,6 @@ extern "C" int os_object_list(object_store_t os_, collection_t c,
   }
 
   *count = 0;
-  if (buf) {
-    buf[0] = '\0';
-  }
   next[0] = '\0';
 
   coll_t cid = cc->ch->cid;
@@ -466,16 +463,13 @@ extern "C" int os_object_list(object_store_t os_, collection_t c,
     return ret;
   }
 
-  // FIXME: 优化掉这次复制
   size_t needed = 0;
-  std::vector<std::string> keys;
-  for (auto& obj : ls) {
-      std::string key = obj.hobj.get_effective_key();
+  for (const auto& obj : ls) {
+      const std::string& key = obj.hobj.get_effective_key();
       std::cout << __func__ << " obj=" << obj << " | hobj=" << obj.hobj << "| key=" << key << std::endl;
-      keys.push_back(key);
       needed += key.size() + 1; // +1 for '\0'
   }
-  *count = keys.size();
+  *count = ls.size();
 
   if (buf && *buf_len < needed) {
       *buf_len = needed;
@@ -484,8 +478,10 @@ extern "C" int os_object_list(object_store_t os_, collection_t c,
 
   if (buf && *buf_len >= needed) {
       char* p = buf;
-      for (auto& key : keys) {
-          strcpy(p, key.c_str());
+      for (const auto& obj : ls) {
+          const std::string& key = obj.hobj.get_effective_key();
+          strncpy(p, key.c_str(), key.size());
+          p[key.size()] = '\0';
           p += key.size() + 1;
       }
       *buf_len = needed;
@@ -494,9 +490,10 @@ extern "C" int os_object_list(object_store_t os_, collection_t c,
   }
 
   if (!next_ghobj.is_max()) {
-      std::string next_str = next_ghobj.hobj.get_key();
+      const std::string& next_str = next_ghobj.hobj.get_key();
       if (next_str.size() + 1 <= *next_len) {
-          strcpy(next, next_str.c_str());
+          strncpy(next, next_str.c_str(), next_str.size());
+          next[next_str.size()] = '\0';
           *next_len = next_str.size() + 1;
       } else {
           *next_len = next_str.size() + 1;
