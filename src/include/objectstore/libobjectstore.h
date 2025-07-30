@@ -65,6 +65,26 @@ typedef uint64_t cid_t;
  */
 typedef void *transaction_t;
 
+/** os_statfs_t
+ * ObjectStore full statfs information
+ */
+struct os_statfs_t
+{
+  uint64_t total = 0;                  ///< Total bytes
+  uint64_t available = 0;              ///< Free bytes available
+  uint64_t internally_reserved = 0;    ///< Bytes reserved for internal purposes
+
+  int64_t allocated = 0;               ///< Bytes allocated by the store
+
+  int64_t data_stored = 0;                ///< Bytes actually stored by the user
+  int64_t data_compressed = 0;            ///< Bytes stored after compression
+  int64_t data_compressed_allocated = 0;  ///< Bytes allocated for compressed data
+  int64_t data_compressed_original = 0;   ///< Bytes that were compressed
+
+  int64_t omap_allocated = 0;         ///< approx usage of omap data
+  int64_t internal_metadata = 0;      ///< approx usage of internal metadata
+};
+
 /**
  * Init ObjectStore configuration context.
  *
@@ -131,6 +151,26 @@ int os_mount(object_store_t os);
  * @returns 0 on success, negative error code on failure
  */
 int os_umount(object_store_t os);
+
+/**
+ * Get statfs information of ObjectStore
+ *
+ * @param os ObjectStore handle
+ * @param buf where to store statfs info
+ * @returns 0 on success, negative error code on failure
+ */
+int os_statfs(object_store_t os, struct store_statfs_t *buf);
+
+/**
+ * Get statfs information of ObjectStore's pool
+ *
+ * @param os ObjectStore handle
+ * @param pool_id id of the pool
+ * @param buf where to store statfs info
+ * @returns 0 on success, negative error code on failure
+ */
+int os_pool_statfs(object_store_t os, uint64_t pool_id,
+  struct store_statfs_t *buf);
 
 /**
  * Get a collection handle.

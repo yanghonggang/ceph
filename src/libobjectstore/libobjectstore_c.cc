@@ -136,6 +136,69 @@ extern "C" int os_umount(object_store_t os_)
   return 0;
 }
 
+static void fill_store_statfs(store_statfs_t *buf, const store_statfs_t &stats) {
+  buf->total = stats.total;
+  buf->available = stats.available;
+  buf->internally_reserved = stats.internally_reserved;
+  buf->allocated = stats.allocated;
+  buf->data_stored = stats.data_stored;
+  buf->data_compressed = stats.data_compressed;
+  buf->data_compressed_allocated = stats.data_compressed_allocated;
+  buf->data_compressed_original = stats.data_compressed_original;
+  buf->omap_allocated = stats.omap_allocated;
+  buf->internal_metadata = stats.internal_metadata;
+}
+
+extern "C" int os_statfs(object_store_t os_, struct store_statfs_t *buf)
+{
+  if (!buf) {
+    std::cerr << "Buffer is null" << std::endl;
+    return -EINVAL;
+  }
+
+  ObjectStore* os = static_cast<ObjectStore*>(os_);
+  if (!os) {
+    std::cerr << "ObjectStore instance is null" << std::endl;
+    return -EINVAL;
+  }
+
+  store_statfs_t stats;
+  int result = os->statfs(&stats);
+  if (result != 0) {
+    return result;
+  }
+
+  fill_store_statfs(buf, stats);
+
+  return 0;
+}
+
+extern "C" int os_pool_statfs(object_store_t os_, uint64_t pool_id,
+  struct store_statfs_t *buf)
+{
+  if (!buf) {
+    std::cerr << "Buffer is null" << std::endl;
+    return -EINVAL;
+  }
+
+  ObjectStore* os = static_cast<ObjectStore*>(os_);
+  if (!os) {
+    std::cerr << "ObjectStore instance is null" << std::endl;
+    return -EINVAL;
+  }
+
+  store_statfs_t stats;
+  bool per_pool_omap;
+  int result = os->pool_statfs(pool_id, &stats, &per_pool_omap);
+  if (result != 0) {
+    return result;
+  }
+
+  fill_store_statfs(buf, stats);
+
+  return 0;
+}
+
 #define PG_ID (0)
 
 struct C_Collection {
