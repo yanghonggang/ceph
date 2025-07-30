@@ -65,25 +65,25 @@ typedef uint64_t cid_t;
  */
 typedef void *transaction_t;
 
-/** os_statfs_t
+/**
  * ObjectStore full statfs information
  */
-struct os_statfs_t
+typedef struct
 {
-  uint64_t total = 0;                  ///< Total bytes
-  uint64_t available = 0;              ///< Free bytes available
-  uint64_t internally_reserved = 0;    ///< Bytes reserved for internal purposes
+  uint64_t total;                  ///< Total bytes
+  uint64_t available;              ///< Free bytes available
+  uint64_t internally_reserved;    ///< Bytes reserved for internal purposes
 
-  int64_t allocated = 0;               ///< Bytes allocated by the store
+  int64_t allocated;               ///< Bytes allocated by the store
 
-  int64_t data_stored = 0;                ///< Bytes actually stored by the user
-  int64_t data_compressed = 0;            ///< Bytes stored after compression
-  int64_t data_compressed_allocated = 0;  ///< Bytes allocated for compressed data
-  int64_t data_compressed_original = 0;   ///< Bytes that were compressed
+  int64_t data_stored;                ///< Bytes actually stored by the user
+  int64_t data_compressed;            ///< Bytes stored after compression
+  int64_t data_compressed_allocated;  ///< Bytes allocated for compressed data
+  int64_t data_compressed_original;   ///< Bytes that were compressed
 
-  int64_t omap_allocated = 0;         ///< approx usage of omap data
-  int64_t internal_metadata = 0;      ///< approx usage of internal metadata
-};
+  int64_t omap_allocated;         ///< approx usage of omap data
+  int64_t internal_metadata;      ///< approx usage of internal metadata
+} os_statfs_t;
 
 /**
  * Init ObjectStore configuration context.
@@ -159,7 +159,7 @@ int os_umount(object_store_t os);
  * @param buf where to store statfs info
  * @returns 0 on success, negative error code on failure
  */
-int os_statfs(object_store_t os, struct store_statfs_t *buf);
+int os_statfs(object_store_t os, os_statfs_t *buf);
 
 /**
  * Get statfs information of ObjectStore's pool
@@ -169,8 +169,7 @@ int os_statfs(object_store_t os, struct store_statfs_t *buf);
  * @param buf where to store statfs info
  * @returns 0 on success, negative error code on failure
  */
-int os_pool_statfs(object_store_t os, uint64_t pool_id,
-  struct store_statfs_t *buf);
+int os_pool_statfs(object_store_t os, uint64_t pool_id, os_statfs_t *buf);
 
 /**
  * Get a collection handle.

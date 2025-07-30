@@ -136,7 +136,7 @@ extern "C" int os_umount(object_store_t os_)
   return 0;
 }
 
-static void fill_store_statfs(store_statfs_t *buf, const store_statfs_t &stats) {
+static void fill_store_statfs(os_statfs_t *buf, const store_statfs_t &stats) {
   buf->total = stats.total;
   buf->available = stats.available;
   buf->internally_reserved = stats.internally_reserved;
@@ -149,7 +149,7 @@ static void fill_store_statfs(store_statfs_t *buf, const store_statfs_t &stats) 
   buf->internal_metadata = stats.internal_metadata;
 }
 
-extern "C" int os_statfs(object_store_t os_, struct store_statfs_t *buf)
+extern "C" int os_statfs(object_store_t os_, os_statfs_t *buf)
 {
   if (!buf) {
     std::cerr << "Buffer is null" << std::endl;
@@ -174,7 +174,7 @@ extern "C" int os_statfs(object_store_t os_, struct store_statfs_t *buf)
 }
 
 extern "C" int os_pool_statfs(object_store_t os_, uint64_t pool_id,
-  struct store_statfs_t *buf)
+  os_statfs_t *buf)
 {
   if (!buf) {
     std::cerr << "Buffer is null" << std::endl;

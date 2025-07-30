@@ -100,6 +100,19 @@ release_coll:
   printf("#Collection released successfully: %p\n", (void*)coll);
 }
 
+void print_statfs_info(os_statfs_t *statfs) {
+    printf("Total bytes: %lu\n", statfs->total);
+    printf("Available bytes: %lu\n", statfs->available);
+    printf("Internally reserved bytes: %lu\n", statfs->internally_reserved);
+    printf("Allocated bytes by store: %" PRId64 "\n", statfs->allocated);
+    printf("Data stored by user: %" PRId64 "\n", statfs->data_stored);
+    printf("Data after compression: %" PRId64 "\n", statfs->data_compressed);
+    printf("Compressed data allocated: %" PRId64 "\n", statfs->data_compressed_allocated);
+    printf("Original bytes before compression: %" PRId64 "\n", statfs->data_compressed_original);
+    printf("OMAP data usage: %" PRId64 "\n", statfs->omap_allocated);
+    printf("Internal metadata usage: %" PRId64 "\n", statfs->internal_metadata);
+}
+
 int main() {
   printf("Creating config context...\n");
   config_ctx_t ctx = config_ctx_create();
@@ -137,6 +150,14 @@ int main() {
       goto cleanup;
     }
     printf("#ObjectStore mount successfully: %p\n", (void*)os);
+
+    os_statfs_t statfs;
+    if (os_statfs(os, &statfs) == 0) {
+        printf("ObjectStore StatFS Info:\n");
+        print_statfs_info(&statfs);
+    } else {
+        fprintf(stderr, "Failed to get ObjectStore statfs info.\n");
+    }
 
     {
       cid_t cid = 12345;
