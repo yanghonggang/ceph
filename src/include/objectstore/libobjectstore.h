@@ -68,21 +68,20 @@ typedef void *transaction_t;
 /**
  * ObjectStore full statfs information
  */
-typedef struct
-{
-  uint64_t total;                  ///< Total bytes
-  uint64_t available;              ///< Free bytes available
-  uint64_t internally_reserved;    ///< Bytes reserved for internal purposes
+typedef struct {
+  uint64_t total;               ///< Total bytes
+  uint64_t available;           ///< Free bytes available
+  uint64_t internally_reserved; ///< Bytes reserved for internal purposes
 
-  int64_t allocated;               ///< Bytes allocated by the store
+  int64_t allocated; ///< Bytes allocated by the store
 
-  int64_t data_stored;                ///< Bytes actually stored by the user
-  int64_t data_compressed;            ///< Bytes stored after compression
-  int64_t data_compressed_allocated;  ///< Bytes allocated for compressed data
-  int64_t data_compressed_original;   ///< Bytes that were compressed
+  int64_t data_stored;               ///< Bytes actually stored by the user
+  int64_t data_compressed;           ///< Bytes stored after compression
+  int64_t data_compressed_allocated; ///< Bytes allocated for compressed data
+  int64_t data_compressed_original;  ///< Bytes that were compressed
 
-  int64_t omap_allocated;         ///< approx usage of omap data
-  int64_t internal_metadata;      ///< approx usage of internal metadata
+  int64_t omap_allocated;    ///< approx usage of omap data
+  int64_t internal_metadata; ///< approx usage of internal metadata
 } os_statfs_t;
 
 /**
@@ -108,8 +107,8 @@ void config_ctx_destroy(config_ctx_t cct);
  * @param os where to store the ObjectStore handle
  * @returns 0 on success, negative error code on failure
  */
-int os_create(config_ctx_t cct, const char* type, const char* data,
-  object_store_t *os);
+int os_create(config_ctx_t cct, const char *type, const char *data,
+              object_store_t *os);
 
 /**
  * Destroy an ObjectStore instance.
@@ -118,7 +117,8 @@ int os_create(config_ctx_t cct, const char* type, const char* data,
  * function, the ObjectStore handle should no longer be used.
  *
  * @param os The handle of the ObjectStore instance to destroy. This handle must
- *           have been previously obtained from a successful call to os_create().
+ *           have been previously obtained from a successful call to
+ * os_create().
  * @returns 0 on success, negative error code on failure. If the ObjectStore
  *          instance is not found, -ENOENT is returned.
  */
@@ -262,8 +262,8 @@ int os_transaction_collection_remove(transaction_t tx, cid_t cid);
  * @returns 0 on success, negative error code on failure
  */
 int os_transaction_object_write(transaction_t tx, cid_t cid, const char *oid,
-                                 const char *data, uint64_t offset,
-                                 uint64_t len, uint32_t flags);
+                                const char *data, uint64_t offset, uint64_t len,
+                                uint32_t flags);
 
 /**
  * Zero out the indicated byte range within an object.
@@ -283,7 +283,7 @@ int os_transaction_object_write(transaction_t tx, cid_t cid, const char *oid,
  * @returns 0 on success, negative error code on failure
  */
 int os_transaction_object_zero(transaction_t tx, cid_t cid, const char *oid,
-  uint64_t off, uint64_t len);
+                               uint64_t off, uint64_t len);
 
 /**
  * Remove an object. All four parts of the object are removed.
@@ -308,7 +308,7 @@ int os_transaction_object_remove(transaction_t tx, cid_t cid, const char *oid);
  * @returns 0 on success, negative error code on failure
  */
 int os_transaction_object_rename(transaction_t tx, cid_t cid,
-  const char *oldoid, const char *oid);
+                                 const char *oldoid, const char *oid);
 
 /**
  * Submit a transaction for execution.
@@ -342,7 +342,7 @@ int os_queue_transaction(object_store_t os, collection_t c, transaction_t tx);
  *  negative error code on failure.
  */
 int os_collection_list(object_store_t os, cid_t start, cid_t *cids, int max,
-  cid_t *next);
+                       cid_t *next);
 
 /**
  * Read a byte range of data from an object.
@@ -395,10 +395,10 @@ int os_object_read(object_store_t os, collection_t c, const char *oid,
  *  amount of next buffer used on output. If next is too small to hold the next
  *  key, next_len will contain the required size.
  * @returns 0 on success, negative error code on failure
-  */
-int os_object_list(object_store_t os, collection_t c, const char* start,
-  const char* end, int max, char* buf, uint64_t* buf_len, int* count,
-  char* next, uint64_t* next_len);
+ */
+int os_object_list(object_store_t os, collection_t c, const char *start,
+                   const char *end, int max, char *buf, uint64_t *buf_len,
+                   int *count, char *next, uint64_t *next_len);
 
 #ifdef __cplusplus
 }
